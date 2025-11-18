@@ -996,7 +996,9 @@ def map_element_summary(valobj: SBValue, internal_dict, data_name):
 
 
 def KeyValue_SummaryProvider(valobj: SBValue, internal_dict):
-    return key_value_summary(valobj, internal_dict, False)
+    key = valobj.GetChildMemberWithName("key")
+    style = should_use_key_val_style(key.GetType() if not_null_check(key) else None)
+    return key_value_summary(valobj, internal_dict, style)
 
 
 def HashMapElement_SummaryProvider(valobj: SBValue, internal_dict):
@@ -1901,7 +1903,7 @@ class HashMap_SyntheticProvider(_LinkedListLike_SyntheticProvider):
             self.cached_idx_to_key_map[index] = keyname
         offset = self.get_offset_of_element_data(element)
         hme_data_type = self.get_list_element_data(element).GetType()
-        value = element.CreateChildAtOffset("[{0}]".format(str(index)), offset, hme_data_type)
+        value = element.CreateChildAtOffset("[{0}]".format(keyname), offset, hme_data_type)
         return value
 
 

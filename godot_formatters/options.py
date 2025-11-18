@@ -11,7 +11,7 @@ class GodotFormatterOptions:
     SUMMARY_STRING_MAX_LENGTH = 100
     MAX_AMOUNT_OF_CHILDREN_IN_SUMMARY = 6
     NAMED_COLOR_ANNOTATION = True
-    MAP_KEY_VAL_STYLE = False
+    MAP_KEY_VAL_STYLE: bool = True
     SANITIZE_STRING_SUMMARY = True
     MIDEBUGGER_COMPAT = False
     FILTER = ""  #'"' + '" , "'.join([".*update.*", ".*__init__.*"]) + '"'
