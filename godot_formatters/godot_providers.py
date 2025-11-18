@@ -1913,14 +1913,14 @@ class RBMap_SyntheticProvider(HashMap_SyntheticProvider):
         return obj.EvaluateExpression("front()").GetNonSyntheticValue()
 
     def get_tail(self, obj: SBValue) -> SBValue:
-        raise Exception("Not implemented, should not be called")
+        return obj.EvaluateExpression("back()").GetNonSyntheticValue()
     
     def get_offset_of_element_data(self, element: SBValue) -> int:
         if self.cached_skip_length >= 0:
             return self.cached_skip_length
         data = self.get_list_element_data(element)
         data_addr = data.GetAddress()
-        right_addr = element.GetChildMemberWithName("right").GetAddress()
+        right_addr = element.GetChildMemberWithName("color").GetAddress()
         self.cached_skip_length = data_addr.GetOffset() - right_addr.GetOffset()
         return self.cached_skip_length
 
