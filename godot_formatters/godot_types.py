@@ -76,4 +76,5 @@ SUMMARY_PROVIDERS: dict[str,object] = {
     HASH_MAP_ELEMENT_PATTERN: HashMapElement_SummaryProvider,
     RBMAP_ELEMENT_PATTERN:     RBMapElement_SummaryProvider,
     VMAP_PAIR_PATTERN:      VMap_Pair_SummaryProvider,
+    "^(::)?Pair<.+,.+>$":    Pair_SummaryProvider,
 }

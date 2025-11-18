@@ -1454,6 +1454,13 @@ def VMap_Pair_SummaryProvider(valobj: SBValue, internal_dict):
         return GenericShortSummary(value, internal_dict)
     return fmt_str.format(*_VMap_Pair_get_keypair_summaries(valobj, internal_dict))
 
+# Pair<K, V>, not part of a map
+def Pair_SummaryProvider(valobj: SBValue, internal_dict):
+    fmt_str = "({0}, {1})"
+    key: SBValue = valobj.GetChildMemberWithName("first")
+    value: SBValue = valobj.GetChildMemberWithName("second")
+    return fmt_str.format(GenericShortSummary(key, internal_dict), GenericShortSummary(value, internal_dict))
+
 
 class VMap_SyntheticProvider(_ArrayLike_SyntheticProvider):
     key_val_element_style: bool = Opts.MAP_KEY_VAL_STYLE
