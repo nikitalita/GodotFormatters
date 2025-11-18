@@ -1430,11 +1430,23 @@ class LocalVector_SyntheticProvider(_ArrayLike_SyntheticProvider):
 
 
 class HashSet_SyntheticProvider(_ArrayLike_SyntheticProvider):
+    OLD_HASH_SET_KEYS_NAME: str = "keys"
+    OLD_HASH_SET_SIZE_NAME: str = "num_elements"
+    hash_set_keys_name: str = "_keys"
+    hash_set_size_name: str = "_size"
+    
+    
+    def __init__(self, valobj: SBValue, internal_dict, is_summary=False):
+        if valobj.GetChildMemberWithName(self.OLD_HASH_SET_SIZE_NAME).IsValid():
+            self.hash_set_keys_name = self.OLD_HASH_SET_KEYS_NAME
+            self.hash_set_size_name = self.OLD_HASH_SET_SIZE_NAME
+        super().__init__(valobj, internal_dict, is_summary)
+
     def get_ptr(self, obj: SBValue) -> SBValue:
-        return obj.GetChildMemberWithName("keys")
+        return obj.GetChildMemberWithName(self.hash_set_keys_name)
 
     def get_len(self, obj: SBValue):
-        return obj.GetChildMemberWithName("num_elements").GetValueAsUnsigned(0)
+        return obj.GetChildMemberWithName(self.hash_set_size_name).GetValueAsUnsigned(0)
 
 
 def _VMap_Pair_get_keypair_summaries(valobj: SBValue, internal_dict, is_VMap_Summary=False) -> tuple[str, str]:
@@ -1630,6 +1642,7 @@ class _LinkedListLike_SyntheticProvider(_ListOfChildren_SyntheticProvider):
     @hashmap_trace
     def check_valid(self, obj: SBValue) -> bool:
         if not not_null_check(obj):
+            print_trace("obj is not valid")
             return False
         size = self.get_len(obj)
         if size > 0:
@@ -1755,8 +1768,19 @@ class HashMap_SyntheticProvider(_LinkedListLike_SyntheticProvider):
     no_cache: bool = False
     cached_skip_length: int = -1
     
+    OLD_HASH_MAP_SIZE_NAME: str = "num_elements"
+    OLD_HASH_MAP_HEAD_ELEMENT_NAME: str = "head_element"
+    OLD_HASH_MAP_TAIL_ELEMENT_NAME: str = "tail_element"
+    hash_map_size_name: str = "_size"
+    hash_map_head_element_name: str = "_head_element"
+    hash_map_tail_element_name: str = "_tail_element"
+    
     @hashmap_trace
     def __init__(self, valobj: SBValue, internal_dict, is_summary=False):
+        if valobj.GetChildMemberWithName(self.OLD_HASH_MAP_SIZE_NAME).IsValid():
+            self.hash_map_size_name = self.OLD_HASH_MAP_SIZE_NAME
+            self.hash_map_head_element_name = self.OLD_HASH_MAP_HEAD_ELEMENT_NAME
+            self.hash_map_tail_element_name = self.OLD_HASH_MAP_TAIL_ELEMENT_NAME
         super().__init__(valobj, internal_dict, is_summary)
 
     @hashmap_trace
@@ -1778,15 +1802,15 @@ class HashMap_SyntheticProvider(_LinkedListLike_SyntheticProvider):
 
     @hashmap_trace
     def get_len(self, obj: SBValue):
-        return obj.GetChildMemberWithName("num_elements").GetValueAsUnsigned()
+        return obj.GetChildMemberWithName(self.hash_map_size_name).GetValueAsUnsigned()
 
     @hashmap_trace
     def get_ptr(self, obj: SBValue) -> SBValue:
-        return obj.GetChildMemberWithName("head_element")
+        return obj.GetChildMemberWithName(self.hash_map_head_element_name)
 
     @hashmap_trace
     def get_tail(self, obj: SBValue) -> SBValue:
-        return obj.GetChildMemberWithName("tail_element")
+        return obj.GetChildMemberWithName(self.hash_map_tail_element_name)
 
     @hashmap_trace
     def get_list_element_next(self, element: SBValue) -> SBValue:
@@ -1973,10 +1997,18 @@ class _Proxy_SyntheticProvider(GodotSynthProvider):
         raise Exception("Not implemented")
 
     def check_valid(self, obj: SBValue) -> bool:
-        return not(not(self.synth_proxy and self.synth_proxy.check_valid(self.synth_proxy.valobj)))
+        if self.synth_proxy is None:
+            return False
+        ret = self.synth_proxy.check_valid(self.synth_proxy.valobj)
+        return ret
 
     def get_summary(self, max_children=Opts.MAX_AMOUNT_OF_CHILDREN_IN_SUMMARY, max_str_len=Opts.SUMMARY_STRING_MAX_LENGTH):
-        if not self.synth_proxy or not self.check_valid(self.valobj):
+        if self.synth_proxy is None:
+            print_trace("synth_proxy is None")
+            self.update()
+        if self.synth_proxy is None:
+            return INVALID_SUMMARY
+        if not self.check_valid(self.valobj):
             return INVALID_SUMMARY
         size = self.synth_proxy.num_elements
         children_summary = self.synth_proxy.get_children_summary(max_children, max_str_len)
