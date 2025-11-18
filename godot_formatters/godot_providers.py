@@ -784,14 +784,6 @@ def String_SummaryProvider(valobj: SBValue, internal_dict):
         return INVALID_SUMMARY
     _ptr: SBValue = _cowdata.GetChildMemberWithName("_ptr")
     _ptr.format = eFormatUnicode32
-    if Opts.SANITIZE_STRING_SUMMARY:
-        ret = _ptr.GetSummary()
-        if ret is None:
-            print_trace("String_SummaryProvider: _ptr.GetSummary() returned None")
-            return EMPTY_SUMMARY
-        if ret.startswith('U"'):
-            ret = '"' + ret.removeprefix('U"')
-        return ret
     data = _ptr.GetPointeeData(0, size)
     error: SBError = SBError()
     arr: bytearray = bytearray()
@@ -801,6 +793,14 @@ def String_SummaryProvider(valobj: SBValue, internal_dict):
     starr = arr.decode("utf-32LE")
     if starr.endswith("\x00"):
         starr = starr[:-1]
+    if Opts.SANITIZE_STRING_SUMMARY: # Sanitize string summaries to escape all formatting characters and quotes
+        new_str = ""
+        for char in starr:
+            if ord(char) < 32 or char == '"':
+                new_str += '\\' + char
+            else:
+                new_str += char
+        starr = new_str
     return '"{0}"'.format(starr)
 
 
