@@ -108,6 +108,35 @@ class VariantType(Enum):
 
 
 @print_trace_dec
+def get_variant_type(valobj: SBValue) -> VariantType | None:
+    if valobj.IsSynthetic():
+        valobj = valobj.GetNonSyntheticValue()
+    type_member = valobj.GetChildMemberWithName("type")
+    if not type_member.IsValid():
+        return None
+    type = type_member.GetValueAsUnsigned()
+    return VariantType(type)
+
+def is_variant_type_non_recursive(type: VariantType | None) -> bool:
+    return type is not None and type not in [
+        VariantType.PACKED_BYTE_ARRAY,
+        VariantType.PACKED_INT32_ARRAY,
+        VariantType.PACKED_INT64_ARRAY,
+        VariantType.PACKED_FLOAT32_ARRAY,
+        VariantType.PACKED_FLOAT64_ARRAY,
+        VariantType.PACKED_STRING_ARRAY,
+        VariantType.PACKED_VECTOR2_ARRAY,
+        VariantType.PACKED_VECTOR3_ARRAY,
+        VariantType.PACKED_COLOR_ARRAY,
+        VariantType.PACKED_VECTOR4_ARRAY,
+        VariantType.OBJECT, 
+        VariantType.DICTIONARY, 
+        VariantType.ARRAY, 
+        VariantType.CALLABLE, 
+        VariantType.SIGNAL, 
+        VariantType.VARIANT_MAX]
+
+@print_trace_dec
 def Variant_GetValue(valobj: SBValue):
     # we need to get the type of the variant
     type = valobj.GetChildMemberWithName("type").GetValueAsUnsigned()
@@ -454,7 +483,9 @@ def StringName_SummaryProvider(valobj: SBValue, internal_dict):
     _data: SBValue = valobj.GetChildMemberWithName("_data")
     if _data.GetValueAsUnsigned() == 0:
         return NULL_SUMMARY
-    if _data.GetChildMemberWithName("cname").GetValueAsUnsigned() == 0:
+    # `cname` was removed in 4.6
+    cname = _data.GetChildMemberWithName("cname")
+    if not not_null_check(cname) or cname.GetValueAsSigned() == 0:
         return _data.GetChildMemberWithName("name").GetSummary()
     else:
         return _data.GetChildMemberWithName("cname").GetSummary()
@@ -848,6 +879,12 @@ def CharString_SummaryProvider(valobj: SBValue, internal_dict):
     return '"{0}"'.format(starr)
 
 
+def get_unqual_type_name(type: SBType) -> str:
+    if type is None or not type.IsValid():
+        return "<ERROR>"
+    var = str(type.GetUnqualifiedType().GetDisplayTypeName())
+    return var.removeprefix("godot::").removeprefix("::")
+
 @print_trace_dec
 def GenericShortSummary(
     valobj: SBValue,
@@ -872,7 +909,11 @@ def GenericShortSummary(
 
     if type.IsPointerType():
         type = type.GetPointeeType()
-    unqual_type_name = str(type.GetUnqualifiedType().GetDisplayTypeName())
+    unqual_type_name = get_unqual_type_name(type)
+    if unqual_type_name == "Variant":
+        variant_type = get_variant_type(valobj)
+        if is_variant_type_non_recursive(variant_type):
+            return Variant_SyntheticProvider(valobj.GetNonSyntheticValue(), internal_dict).get_summary()
     if unqual_type_name == "Object" or unqual_type_name == "RefCounted":  # these lead to circular references
         return "{...}"
     if unqual_type_name.startswith("Ref<"):
@@ -1140,7 +1181,7 @@ class _ListOfChildren_SyntheticProvider(GodotSynthProvider):
     @print_trace_dec
     def __init__(self, valobj: SBValue, internal_dict, is_summary=False):
         self.type: SBType = valobj.GetType()
-        self.typename: str = self.type.GetUnqualifiedType().GetDisplayTypeName()
+        self.typename: str = get_unqual_type_name(self.type)
         self.no_cache = NO_CACHE_MEMBERS
         self.cache_min = CACHE_MIN if not is_summary else Opts.MAX_AMOUNT_OF_CHILDREN_IN_SUMMARY
         self.cache_fetch_max = CACHE_FETCH_MAX
@@ -2012,7 +2053,7 @@ class _Proxy_SyntheticProvider(GodotSynthProvider):
             return INVALID_SUMMARY
         size = self.synth_proxy.num_elements
         children_summary = self.synth_proxy.get_children_summary(max_children, max_str_len)
-        type_name = self.valobj.GetType().GetUnqualifiedType().GetDisplayTypeName()
+        type_name = get_unqual_type_name(self.valobj.GetType())
         return LIST_FORMAT.format(
             type_name=type_name,
             type_no_template=type_name.split("<")[0],
@@ -2109,7 +2150,7 @@ class RingBuffer_SyntheticProvider(_Proxy_SyntheticProvider):
             proxy_children_sum = self.synth_proxy.get_children_summary(max_children, max_str_len)
             children_summary = f"{read_pos_summary} {write_pos_summary} {proxy_children_sum}"
         return LIST_FORMAT.format(
-            type_name=self.valobj.GetType().GetUnqualifiedType().GetDisplayTypeName(),
+            type_name=get_unqual_type_name(self.valobj.GetType()),
             type_no_template="RingBuffer",
             size=size,
             children=children_summary,
