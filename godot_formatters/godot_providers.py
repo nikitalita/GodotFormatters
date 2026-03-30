@@ -108,6 +108,35 @@ class VariantType(Enum):
 
 
 @print_trace_dec
+def get_variant_type(valobj: SBValue) -> VariantType | None:
+    if valobj.IsSynthetic():
+        valobj = valobj.GetNonSyntheticValue()
+    type_member = valobj.GetChildMemberWithName("type")
+    if not type_member.IsValid():
+        return None
+    type = type_member.GetValueAsUnsigned()
+    return VariantType(type)
+
+def is_variant_type_non_recursive(type: VariantType | None) -> bool:
+    return type is not None and type not in [
+        VariantType.PACKED_BYTE_ARRAY,
+        VariantType.PACKED_INT32_ARRAY,
+        VariantType.PACKED_INT64_ARRAY,
+        VariantType.PACKED_FLOAT32_ARRAY,
+        VariantType.PACKED_FLOAT64_ARRAY,
+        VariantType.PACKED_STRING_ARRAY,
+        VariantType.PACKED_VECTOR2_ARRAY,
+        VariantType.PACKED_VECTOR3_ARRAY,
+        VariantType.PACKED_COLOR_ARRAY,
+        VariantType.PACKED_VECTOR4_ARRAY,
+        VariantType.OBJECT, 
+        VariantType.DICTIONARY, 
+        VariantType.ARRAY, 
+        VariantType.CALLABLE, 
+        VariantType.SIGNAL, 
+        VariantType.VARIANT_MAX]
+
+@print_trace_dec
 def Variant_GetValue(valobj: SBValue):
     # we need to get the type of the variant
     type = valobj.GetChildMemberWithName("type").GetValueAsUnsigned()
@@ -454,7 +483,7 @@ def StringName_SummaryProvider(valobj: SBValue, internal_dict):
     _data: SBValue = valobj.GetChildMemberWithName("_data")
     if _data.GetValueAsUnsigned() == 0:
         return NULL_SUMMARY
-    if _data.GetChildMemberWithName("cname").GetValueAsUnsigned() == 0:
+    if _data.GetChildMemberWithName("cname").GetValueAsSigned() == 0:
         return _data.GetChildMemberWithName("name").GetSummary()
     else:
         return _data.GetChildMemberWithName("cname").GetSummary()
@@ -873,6 +902,10 @@ def GenericShortSummary(
     if type.IsPointerType():
         type = type.GetPointeeType()
     unqual_type_name = str(type.GetUnqualifiedType().GetDisplayTypeName())
+    if unqual_type_name == "Variant":
+        variant_type = get_variant_type(valobj)
+        if is_variant_type_non_recursive(variant_type):
+            return Variant_SyntheticProvider(valobj.GetNonSyntheticValue(), internal_dict).get_summary()
     if unqual_type_name == "Object" or unqual_type_name == "RefCounted":  # these lead to circular references
         return "{...}"
     if unqual_type_name.startswith("Ref<"):
