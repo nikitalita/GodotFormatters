@@ -483,7 +483,9 @@ def StringName_SummaryProvider(valobj: SBValue, internal_dict):
     _data: SBValue = valobj.GetChildMemberWithName("_data")
     if _data.GetValueAsUnsigned() == 0:
         return NULL_SUMMARY
-    if _data.GetChildMemberWithName("cname").GetValueAsSigned() == 0:
+    # `cname` was removed in 4.6
+    cname = _data.GetChildMemberWithName("cname")
+    if not not_null_check(cname) or cname.GetValueAsSigned() == 0:
         return _data.GetChildMemberWithName("name").GetSummary()
     else:
         return _data.GetChildMemberWithName("cname").GetSummary()
