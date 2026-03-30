@@ -405,7 +405,10 @@ def get_synth_provider_for_object(cls: type[T], valobj: SBValue, internal_dict, 
             return synth_prov
         else:
             print(f"ERROR: Synth provider for {valobj.GetDisplayTypeName()} is not of type {cls.__name__}, is {type(synth_prov).__name__}")
-    return cls(valobj.GetNonSyntheticValue(), internal_dict, is_summary)  # type: ignore
+    # is GodotSynthProvider or a subclass of GodotSynthProvider
+    if cls is GodotSynthProvider or issubclass(cls, GodotSynthProvider):
+        return cls(valobj.GetNonSyntheticValue(), internal_dict, is_summary)
+    return cls(valobj.GetNonSyntheticValue())
 
 
 class Variant_SyntheticProvider(GodotSynthProvider):
