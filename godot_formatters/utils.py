@@ -570,11 +570,17 @@ def not_null_check(valobj: Optional[SBValue]) -> bool:
 @print_trace_dec
 def get_synth_summary(synth_class, valobj: SBValue, dict):
     obj = valobj
-    if valobj.IsSynthetic():
-        obj = valobj.GetNonSyntheticValue()
     synth = synth_class(obj, dict, 1)
     summary = synth.get_summary()
     return summary
+
+def print_stack_trace() -> None:
+    import traceback
+    stack = traceback.extract_stack()
+    # ignore this function
+    for i in range(len(stack) - 2, -1, -1):
+        frame = stack[i]
+        print(f"{frame[0]}:{frame[1]} in {frame[2]}")
 
 
 def ValCheck(val: SBValue) -> SBValue:

@@ -347,12 +347,19 @@ class GodotSynthProvider(_SBSyntheticValueProviderWithSummary):
     @print_trace_dec
     def __init__(self, valobj: SBValue, internal_dict, is_summary=False):
         super().__init__(valobj)  # Not needed, but we need to call it to satisfy the linter
+        if valobj.GetType().IsPointerType() and not self.is_pointer_synth_provider():
+            valobj = valobj.Dereference()
+        if valobj.IsSynthetic():
+            valobj = valobj.GetNonSyntheticValue()
         self.valobj = valobj
         self.internal_dict = internal_dict
         self.is_summary = is_summary
         self.obj_id = GodotSynthProvider.next_id
         GodotSynthProvider.synth_by_id[self.obj_id] = self
         GodotSynthProvider.next_id += 1
+
+    def is_pointer_synth_provider(self) -> bool:
+        return False
 
     # SBSyntheticValueProvider, override these
     def num_children(self, max=UINT32_MAX) -> int:
