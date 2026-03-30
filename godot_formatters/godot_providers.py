@@ -877,6 +877,12 @@ def CharString_SummaryProvider(valobj: SBValue, internal_dict):
     return '"{0}"'.format(starr)
 
 
+def get_unqual_type_name(type: SBType) -> str:
+    if type is None or not type.IsValid():
+        return "<ERROR>"
+    var = str(type.GetUnqualifiedType().GetDisplayTypeName())
+    return var.removeprefix("godot::").removeprefix("::")
+
 @print_trace_dec
 def GenericShortSummary(
     valobj: SBValue,
@@ -901,7 +907,7 @@ def GenericShortSummary(
 
     if type.IsPointerType():
         type = type.GetPointeeType()
-    unqual_type_name = str(type.GetUnqualifiedType().GetDisplayTypeName())
+    unqual_type_name = get_unqual_type_name(type)
     if unqual_type_name == "Variant":
         variant_type = get_variant_type(valobj)
         if is_variant_type_non_recursive(variant_type):
@@ -1173,7 +1179,7 @@ class _ListOfChildren_SyntheticProvider(GodotSynthProvider):
     @print_trace_dec
     def __init__(self, valobj: SBValue, internal_dict, is_summary=False):
         self.type: SBType = valobj.GetType()
-        self.typename: str = self.type.GetUnqualifiedType().GetDisplayTypeName()
+        self.typename: str = get_unqual_type_name(self.type)
         self.no_cache = NO_CACHE_MEMBERS
         self.cache_min = CACHE_MIN if not is_summary else Opts.MAX_AMOUNT_OF_CHILDREN_IN_SUMMARY
         self.cache_fetch_max = CACHE_FETCH_MAX
@@ -2045,7 +2051,7 @@ class _Proxy_SyntheticProvider(GodotSynthProvider):
             return INVALID_SUMMARY
         size = self.synth_proxy.num_elements
         children_summary = self.synth_proxy.get_children_summary(max_children, max_str_len)
-        type_name = self.valobj.GetType().GetUnqualifiedType().GetDisplayTypeName()
+        type_name = get_unqual_type_name(self.valobj.GetType())
         return LIST_FORMAT.format(
             type_name=type_name,
             type_no_template=type_name.split("<")[0],
@@ -2142,7 +2148,7 @@ class RingBuffer_SyntheticProvider(_Proxy_SyntheticProvider):
             proxy_children_sum = self.synth_proxy.get_children_summary(max_children, max_str_len)
             children_summary = f"{read_pos_summary} {write_pos_summary} {proxy_children_sum}"
         return LIST_FORMAT.format(
-            type_name=self.valobj.GetType().GetUnqualifiedType().GetDisplayTypeName(),
+            type_name=get_unqual_type_name(self.valobj.GetType()),
             type_no_template="RingBuffer",
             size=size,
             children=children_summary,
