@@ -118,17 +118,8 @@ def attach_synthetic_to_type(module, category: SBTypeCategory, type_name, synth_
     def summary_fn(valobj, dict):
         return get_synth_summary(synth_class, valobj, dict)
 
-    # LLDB accesses summary fn's by name, so we need to create a unique one.
-    summary_fn.__name__ = "_get_synth_summary_" + synth_class.__name__
-    setattr(module, summary_fn.__name__, summary_fn)
-    print_trace(f"attaching summary {summary_fn.__name__} to {type_name}, is_regex={is_regex}")
-    summary = SBTypeSummary.CreateWithFunctionName(__name__ + "." + summary_fn.__name__)
-    summary.SetOptions(eTypeOptionCascade)
-    if not category.AddTypeSummary(SBTypeNameSpecifier(type_name, is_regex), summary):
-        print(f"Failed to add summary for {type_name}")
-
-    # attach_summary_to_type(summary_fn, type_name, is_regex)
-
+    real_fn_name = "_get_synth_summary_" + synth_class.__name__
+    attach_summary_to_type(module, category, type_name, summary_fn, is_regex, real_fn_name)
 
 def attach_summary_to_type(module, category: SBTypeCategory, type_name, real_summary_fn, is_regex=False, real_fn_name: Optional[str] = None):
     if not real_fn_name:
@@ -246,7 +237,7 @@ class _LLDBCommandBase:
         print('The "{0}" command has been installed, type "help {0}" for detailed help.'.format(full_program_name))
 
     @classmethod
-    def create_options(cls):
+    def create_options(cls) -> Optional[optparse.OptionParser]:
         return None
 
     def get_short_help(self):
@@ -356,6 +347,7 @@ class SetOptsCommand(_LLDBCommandBase):
     def __init__(self, debugger, unused):
         self.parser = self.create_options()
         self.help_string = self.parser.format_help()
+        super().__init__(debugger, unused)
 
     def __call__(
         self,
@@ -435,3 +427,27 @@ def __lldb_init_module(debugger: SBDebugger, dict):
     SetOptsCommand.register_lldb_command(debugger, __name__, CONTAINER_NAME, FORMATTER_NAME)
     GetOptsCommand.register_lldb_command(debugger, __name__, CONTAINER_NAME, FORMATTER_NAME)
     ReloadCommand.register_lldb_command(debugger, __name__, CONTAINER_NAME, FORMATTER_NAME)
+
+
+# TODO: not currently working, this hangs LLDB
+# import multiprocessing
+
+# def run_function_with_timeout(func, args, timeout: int = 10):
+#     def worker(procnum, return_dict, actual_func, actual_args):
+#         return_dict[procnum] = actual_func(*actual_args)        
+#     try:
+#         manager = multiprocessing.Manager()
+#         return_dict = manager.dict()
+#         worker_args = (0, return_dict, func, args)
+#         proc = multiprocessing.Process(target=worker, args=worker_args)
+#         proc.start()
+#         proc.join(10)
+#         if proc.is_alive():
+#             proc.terminate()
+#             return f"<{func.__qualname__} timed out>"
+#         return return_dict[0]
+#     except Exception as e:
+#         err_msg = "ERROR in " + func.__qualname__ + ": " + str(e)
+#         print_verbose(err_msg)
+#         print_verbose(get_exception_trace(e))
+#         return f"<{err_msg}>"
