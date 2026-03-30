@@ -15,7 +15,7 @@ from godot_formatters.godot_gdext_providers import (
 
 # opaque types with synthetic providers
 GDEXT_VARIANT_PATTERN:str = f"^godot_core::builtin::variant::Variant$"
-GDEXT_DICTIONARY_PATTERN:str = "^godot_core::builtin::collections::dictionary::Dictionary$"
+GDEXT_DICTIONARY_PATTERN: str = "^godot_core::builtin::collections::dictionary::(Var)?Dictionary(<.*>)?$"
 GDEXT_ARRAY_PATTERN:str = "^godot_core::builtin::collections::array::Array<.*>$"
 GDEXT_VECTOR_PATTERN:str = "^godot_core::builtin::collections::packed_array::Packed.+Array$"
 # No Synthetic providers for these types, but they're opaque

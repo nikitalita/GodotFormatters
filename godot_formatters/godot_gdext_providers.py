@@ -36,6 +36,8 @@ def get_godot_type_name_from_str(type_name: str) -> str:
         type_name = "RID"
     elif (type_name == "Aabb"):
         type_name = "AABB"
+    elif type_name == "VarDictionary":
+        type_name = "Dictionary"
     type_name = "::" + type_name
     return type_name
 
