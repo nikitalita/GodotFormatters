@@ -10,6 +10,7 @@ from godot_formatters.godot_gdext_providers import (
     RustChangeHashSummaryProvider,
     RustDocumentIdSummaryProvider,
     RustHistoryRefSummaryProvider,
+    RustUuidSummaryProvider,
 )
 
 # opaque types with synthetic providers
@@ -54,6 +55,8 @@ GDEXT_RAW_GD_PATTERN:str = "^godot_core::obj::raw_gd::RawGd<.+>$"
 RUST_HISTORY_REF_PATTERN: str = "^(::)?.*::HistoryRef$"
 RUST_DOCUMENT_ID_PATTERN: str = "^(::)?.*::DocumentId$"
 RUST_CHANGE_HASH_PATTERN: str = "^(::)?.*::ChangeHash$"
+RUST_UUID_PATTERN: str = "^(::)?.*::Uuid$"
+RUST_UUID_UPPER_PATTERN: str = "^(::)?.*::UUID$"
 
 
 GDEXT_SYNTHETIC_PROVIDERS: dict[str,type] = {
@@ -95,4 +98,6 @@ GDEXT_SUMMARY_PROVIDERS: dict[str, object] = {
     RUST_HISTORY_REF_PATTERN: RustHistoryRefSummaryProvider,
     RUST_DOCUMENT_ID_PATTERN: RustDocumentIdSummaryProvider,
     RUST_CHANGE_HASH_PATTERN: RustChangeHashSummaryProvider,
+    RUST_UUID_PATTERN: RustUuidSummaryProvider,
+    RUST_UUID_UPPER_PATTERN: RustUuidSummaryProvider,
 }

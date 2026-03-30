@@ -424,3 +424,12 @@ def RustHistoryRefSummaryProvider(valobj: SBValue, internal_dict):
         head_summaries.append(head_summary)
 
     return f"{branch_summary}+{'.'.join(head_summaries)}"
+
+
+def RustUuidSummaryProvider(valobj: SBValue, internal_dict):
+    # uuid::Uuid Display delegates to LowerHex over the hyphenated form.
+    raw_bytes = _extract_fixed_bytes(valobj, 16)
+    if raw_bytes is None or len(raw_bytes) != 16:
+        return INVALID_SUMMARY
+    hex_str = bytes(raw_bytes).hex()
+    return f"{hex_str[0:8]}-{hex_str[8:12]}-{hex_str[12:16]}-{hex_str[16:20]}-{hex_str[20:32]}"
