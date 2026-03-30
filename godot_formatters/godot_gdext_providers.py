@@ -2,7 +2,7 @@
 from types import TracebackType
 from typing import Callable, Generator, final, Optional
 
-from lldb import (SBError, SBValue, SBTarget, SBType)
+from lldb import (SBError, SBValue, SBTarget, SBType)  # pyright: ignore[reportMissingModuleSource]
 # fmt: on
 from enum import Enum
 import hashlib

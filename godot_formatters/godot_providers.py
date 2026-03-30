@@ -19,13 +19,13 @@ from types import TracebackType
 from typing import Any, Callable, Generic, Never, TypeVar, final, Optional
 
 # fmt: off
-from lldb import (SBCommandReturnObject, SBExecutionContext, SBPlatform, SBTypeCategory, SBValue, eFormatBytes, eFormatCString, eFormatUnicode16, eFormatUnicode32, eNoDynamicValues, eDynamicDontRunTarget, eDynamicCanRunTarget, eBasicTypeInvalid, eBasicTypeVoid, eBasicTypeChar, 
+from lldb import (SBCommandReturnObject, SBExecutionContext, SBPlatform, SBTypeCategory, SBValue, eFormatBytes, eFormatCString, eFormatUnicode16, eFormatUnicode32, eNoDynamicValues, eDynamicDontRunTarget, eDynamicCanRunTarget, eBasicTypeInvalid, eBasicTypeVoid, eBasicTypeChar,  # pyright: ignore[reportMissingModuleSource]
                   eBasicTypeSignedChar, eBasicTypeUnsignedChar, eBasicTypeWChar, eBasicTypeSignedWChar, eBasicTypeUnsignedWChar, eBasicTypeChar16, eBasicTypeChar32, 
                   eBasicTypeChar8, eBasicTypeShort, eBasicTypeUnsignedShort, eBasicTypeInt, eBasicTypeUnsignedInt, eBasicTypeLong, eBasicTypeUnsignedLong, eBasicTypeLongLong, 
                   eBasicTypeUnsignedLongLong, eBasicTypeInt128, eBasicTypeUnsignedInt128, eBasicTypeBool, eBasicTypeHalf, eBasicTypeFloat, eBasicTypeDouble, eBasicTypeLongDouble, 
                   eBasicTypeFloatComplex, eBasicTypeDoubleComplex, eBasicTypeLongDoubleComplex, eBasicTypeObjCID, eBasicTypeObjCClass, eBasicTypeObjCSel, eBasicTypeNullPtr, eReturnStatusSuccessFinishNoResult, eReturnStatusSuccessFinishResult, 
                   eTypeClassClass, eTypeClassEnumeration, eTypeClassPointer, eTypeOptionCascade)
-from lldb import ( SBValue, SBAddress, SBData, SBType, SBTypeEnumMember, SBTypeEnumMemberList, SBSyntheticValueProvider, SBError, SBTarget, SBDebugger, SBTypeSummary, SBTypeSynthetic, SBTypeNameSpecifier)
+from lldb import ( SBAddress, SBData, SBType, SBTypeEnumMember, SBTypeEnumMemberList, SBSyntheticValueProvider, SBError, SBTarget, SBDebugger, SBTypeSummary, SBTypeSynthetic, SBTypeNameSpecifier)  # pyright: ignore[reportMissingModuleSource]
 # fmt: on
 # fmt: off
 
@@ -347,12 +347,19 @@ class GodotSynthProvider(_SBSyntheticValueProviderWithSummary):
     @print_trace_dec
     def __init__(self, valobj: SBValue, internal_dict, is_summary=False):
         super().__init__(valobj)  # Not needed, but we need to call it to satisfy the linter
+        if valobj.GetType().IsPointerType() and not self.is_pointer_synth_provider():
+            valobj = valobj.Dereference()
+        if valobj.IsSynthetic():
+            valobj = valobj.GetNonSyntheticValue()
         self.valobj = valobj
         self.internal_dict = internal_dict
         self.is_summary = is_summary
         self.obj_id = GodotSynthProvider.next_id
         GodotSynthProvider.synth_by_id[self.obj_id] = self
         GodotSynthProvider.next_id += 1
+
+    def is_pointer_synth_provider(self) -> bool:
+        return False
 
     # SBSyntheticValueProvider, override these
     def num_children(self, max=UINT32_MAX) -> int:
@@ -405,7 +412,10 @@ def get_synth_provider_for_object(cls: type[T], valobj: SBValue, internal_dict, 
             return synth_prov
         else:
             print(f"ERROR: Synth provider for {valobj.GetDisplayTypeName()} is not of type {cls.__name__}, is {type(synth_prov).__name__}")
-    return cls(valobj.GetNonSyntheticValue(), internal_dict, is_summary)  # type: ignore
+    # is GodotSynthProvider or a subclass of GodotSynthProvider
+    if cls is GodotSynthProvider or issubclass(cls, GodotSynthProvider):
+        return cls(valobj.GetNonSyntheticValue(), internal_dict, is_summary)
+    return cls(valobj.GetNonSyntheticValue())
 
 
 class Variant_SyntheticProvider(GodotSynthProvider):
@@ -861,7 +871,7 @@ def CharString_SummaryProvider(valobj: SBValue, internal_dict):
     _ptr.format = format
     if Opts.SANITIZE_STRING_SUMMARY:
         ret = _ptr.GetSummary()
-        if ret is None:
+        if ret is None:  # pyright: ignore[reportUnnecessaryComparison]
             print_trace("String_SummaryProvider: _ptr.GetSummary() returned None")
             return EMPTY_SUMMARY
         if ret.startswith('U"'):
@@ -880,7 +890,7 @@ def CharString_SummaryProvider(valobj: SBValue, internal_dict):
 
 
 def get_unqual_type_name(type: SBType) -> str:
-    if type is None or not type.IsValid():
+    if type is None or not type.IsValid():  # pyright: ignore[reportUnnecessaryComparison]
         return "<ERROR>"
     var = str(type.GetUnqualifiedType().GetDisplayTypeName())
     return var.removeprefix("godot::").removeprefix("::")
@@ -1518,7 +1528,6 @@ def Pair_SummaryProvider(valobj: SBValue, internal_dict):
 class VMap_SyntheticProvider(_ArrayLike_SyntheticProvider):
     key_val_element_style: bool = Opts.MAP_KEY_VAL_STYLE
     key_template_type: Optional[SBType] = None
-    key_val_element_style: bool = False
     ptr_cast: Optional[SBValue] = None
     cached_key_summaries: list[str] = list[str]()
     cached_key_to_idx_map: dict[str, int] = dict[str, int]()
@@ -1882,7 +1891,7 @@ class HashMap_SyntheticProvider(_LinkedListLike_SyntheticProvider):
 
     @hashmap_trace
     def get_index_of_key(self, key: str):
-        if key in self.cached_key_to_idx_map and self.cached_key_to_idx_map[key] is not None:
+        if key in self.cached_key_to_idx_map and self.cached_key_to_idx_map[key] is not None:  # pyright: ignore[reportUnnecessaryComparison]
             return self.cached_key_to_idx_map[key]
         while len(self.cached_elements) < self.num_elements:  # type: ignore
             new_length = len(self.cached_elements) + self.cache_fetch_max
@@ -1890,7 +1899,7 @@ class HashMap_SyntheticProvider(_LinkedListLike_SyntheticProvider):
                 new_length = self.num_elements
             self._cache_elements(new_length)
             idx = self.cached_key_to_idx_map[key]
-            if idx is not None:  # type: ignore
+            if idx is not None:  # type: ignore  # pyright: ignore[reportUnnecessaryComparison]
                 return idx
         return None
 
@@ -2125,7 +2134,7 @@ class RingBuffer_SyntheticProvider(_Proxy_SyntheticProvider):
     size_mask: int = 0
     
     def update(self) -> None:
-        self.synth_proxy: Optional[Vector_SyntheticProvider] = None
+        self.synth_proxy = None
         self.read_pos = 0
         self.write_pos = 0
         self.size_mask = 0
@@ -2188,7 +2197,7 @@ class RingBuffer_SyntheticProvider(_Proxy_SyntheticProvider):
                         SBData.CreateDataFromInt(0),
                         self.valobj.target.GetBasicType(eBasicTypeNullPtr),
                     )
-                value = self.synth_proxy.create_child_at_real_index(pos_val, synth_name)
+                value = self.synth_proxy.create_child_at_real_index(pos_val, synth_name)  # pyright: ignore[reportAttributeAccessIssue]
             else:
                 value = self.synth_proxy.get_child_at_index(idx - 2)
         else:
