@@ -1518,7 +1518,6 @@ def Pair_SummaryProvider(valobj: SBValue, internal_dict):
 class VMap_SyntheticProvider(_ArrayLike_SyntheticProvider):
     key_val_element_style: bool = Opts.MAP_KEY_VAL_STYLE
     key_template_type: Optional[SBType] = None
-    key_val_element_style: bool = False
     ptr_cast: Optional[SBValue] = None
     cached_key_summaries: list[str] = list[str]()
     cached_key_to_idx_map: dict[str, int] = dict[str, int]()
