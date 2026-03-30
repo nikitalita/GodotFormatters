@@ -1,6 +1,17 @@
 from importlib import reload
 
-from godot_formatters.godot_gdext_providers import GDExtBaseGDObjectSynthProvider, GDExtGenericSynthProvider, GDExtGenericSummaryProvider, GDExtOpaqueSummaryProvider, GDExtRIDSummaryProvider, GDExtGDObjectSynthProvider 
+from godot_formatters.godot_gdext_providers import (
+    GDExtBaseGDObjectSynthProvider,
+    GDExtGenericSynthProvider,
+    GDExtGenericSummaryProvider,
+    GDExtOpaqueSummaryProvider,
+    GDExtRIDSummaryProvider,
+    GDExtGDObjectSynthProvider,
+    RustChangeHashSummaryProvider,
+    RustDocumentIdSummaryProvider,
+    RustHistoryRefSummaryProvider,
+    RustUuidSummaryProvider,
+)
 
 # opaque types with synthetic providers
 GDEXT_VARIANT_PATTERN:str = f"^godot_core::builtin::variant::Variant$"
@@ -40,6 +51,11 @@ GDEXT_BASE_PATTERN:str = "^godot_core::obj::base::Base<.+>$"
 GDEXT_GD_PATTERN:str = "^godot_core::obj::gd::Gd<.+>$"
 GDEXT_RAW_GD_PATTERN:str = "^godot_core::obj::raw_gd::RawGd<.+>$"
 
+# Rust-specific summaries
+RUST_HISTORY_REF_PATTERN: str = "^(::)?(patchwork_rust|patchwork_rust_core)(::helpers::history_ref)?::HistoryRef$"
+RUST_DOCUMENT_ID_PATTERN: str = "^(::)?(samod|samod_core)(::document_id)?::DocumentId$"
+RUST_CHANGE_HASH_PATTERN: str = "^(::)?automerge(::types)?::ChangeHash$"
+RUST_UUID_PATTERN: str = "^(::)?uuid::Uuid$"
 
 
 GDEXT_SYNTHETIC_PROVIDERS: dict[str,type] = {
@@ -52,7 +68,7 @@ GDEXT_SYNTHETIC_PROVIDERS: dict[str,type] = {
     GDEXT_BASE_PATTERN: GDExtBaseGDObjectSynthProvider,
 }
 
-GDEXT_SUMMARY_PROVIDERS: dict[str,object] = {
+GDEXT_SUMMARY_PROVIDERS: dict[str, object] = {
     # opaque types
     GDEXT_STRING_PATTERN: GDExtOpaqueSummaryProvider,
     GDEXT_STRING_NAME_PATTERN: GDExtOpaqueSummaryProvider,
@@ -67,7 +83,7 @@ GDEXT_SUMMARY_PROVIDERS: dict[str,object] = {
     GDEXT_VECTOR4_PATTERN: GDExtGenericSummaryProvider,
     GDEXT_VECTOR4I_PATTERN: GDExtGenericSummaryProvider,
     GDEXT_PLANE_PATTERN: GDExtGenericSummaryProvider,
-    GDEXT_PROJECTION_PATTERN: GDExtGenericSummaryProvider,   
+    GDEXT_PROJECTION_PATTERN: GDExtGenericSummaryProvider,
     GDEXT_QUATERNION_PATTERN: GDExtGenericSummaryProvider,
     GDEXT_AABB_PATTERN: GDExtGenericSummaryProvider,
     GDEXT_BASIS_PATTERN: GDExtGenericSummaryProvider,
@@ -76,6 +92,10 @@ GDEXT_SUMMARY_PROVIDERS: dict[str,object] = {
     GDEXT_RECT2_PATTERN: GDExtGenericSummaryProvider,
     GDEXT_RECT2I_PATTERN: GDExtGenericSummaryProvider,
     GDEXT_COLOR_PATTERN: GDExtGenericSummaryProvider,
-    GDEXT_RID_PATTERN: GDExtGenericSummaryProvider,
-    
+    GDEXT_RID_PATTERN: GDExtRIDSummaryProvider,
+    # rust types
+    RUST_HISTORY_REF_PATTERN: RustHistoryRefSummaryProvider,
+    RUST_DOCUMENT_ID_PATTERN: RustDocumentIdSummaryProvider,
+    RUST_CHANGE_HASH_PATTERN: RustChangeHashSummaryProvider,
+    RUST_UUID_PATTERN: RustUuidSummaryProvider,
 }

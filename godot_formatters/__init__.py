@@ -2,7 +2,6 @@
 from importlib import reload
 
 
-
 import godot_formatters.options
 
 godot_formatters.options = reload(godot_formatters.options)
@@ -72,9 +71,8 @@ def clear_globals():
         constructed_the_table = False
     except Exception as e:
         print("Error clearing globals: " + str(e))
-        
-        
-        
+
+
 def printAllCategories(debugger: SBDebugger):
     count = debugger.GetNumCategories()
     for i in range(count):
@@ -154,24 +152,45 @@ def attach_summary_to_type(module, category: SBTypeCategory, type_name, real_sum
         print(f"Failed to add summary for {type_name}")
 
 
-
-
-def register_all_synth_and_summary_providers(module, category: SBTypeCategory, debugger: SBDebugger, SUMMARY_PROVIDERS, SYNTHETIC_PROVIDERS):
+def remove_all_summary_providers(category: SBTypeCategory, SUMMARY_PROVIDERS):
     for key in SUMMARY_PROVIDERS:
         try:
             if category.DeleteTypeSummary(SBTypeNameSpecifier(key, True)):
                 print_trace(f"Deleted summary for {key}")
             else:
                 print_trace(f"No summary found for {key}")
+        except Exception as e:
+            print_verbose(f"EXCEPTION WHILE REMOVING {key}: " + str(e))
+
+
+def remove_all_synth_providers(category: SBTypeCategory, SYNTHETIC_PROVIDERS):
+    for key in SYNTHETIC_PROVIDERS:
+        try:
+            if category.DeleteTypeSynthetic(SBTypeNameSpecifier(key, True)):
+                print_trace(f"Deleted synthetic for {key}")
+            else:
+                print_trace(f"No synthetic found for {key}")
+        except Exception as e:
+            print_verbose(f"EXCEPTION WHILE REMOVING {key}: " + str(e))
+
+
+def remove_all_providers(category: SBTypeCategory, SUMMARY_PROVIDERS, SYNTHETIC_PROVIDERS):
+    remove_all_summary_providers(category, SUMMARY_PROVIDERS)
+    remove_all_summary_providers(category, SYNTHETIC_PROVIDERS)
+    remove_all_synth_providers(category, SYNTHETIC_PROVIDERS)
+
+
+def register_all_synth_and_summary_providers(
+    module, category: SBTypeCategory, debugger: SBDebugger, SUMMARY_PROVIDERS, SYNTHETIC_PROVIDERS
+):
+    remove_all_providers(category, SUMMARY_PROVIDERS, SYNTHETIC_PROVIDERS)
+    for key in SUMMARY_PROVIDERS:
+        try:
             attach_summary_to_type(module, category, key, SUMMARY_PROVIDERS[key], True)
         except Exception as e:
             print_verbose("EXCEPTION: " + str(e))
     for key in SYNTHETIC_PROVIDERS:
         try:
-            if category.DeleteTypeSummary(SBTypeNameSpecifier(key, True)):
-                print_trace(f"Deleted synthetic for {key}")
-            else:
-                print_trace(f"No synthetic found for {key}")
             attach_synthetic_to_type(module, category, key, SYNTHETIC_PROVIDERS[key], True)
         except Exception as e:
             print_verbose("EXCEPTION st: " + str(e))
@@ -389,6 +408,17 @@ def register_all_providers(debugger: SBDebugger):
     global module
     cpp_category: SBTypeCategory = debugger.GetDefaultCategory()
     rust_category: SBTypeCategory = debugger.GetCategory("Rust")
+    if not rust_category:
+        debugger.HandleCommand("type category enable Rust")
+        rust_category = debugger.GetCategory("Rust")
+    if not rust_category:
+        print("Failed to enable Rust category, using C++ category instead")
+        rust_category = cpp_category
+    # No longer needed, enabling the Rust category now works and we don't want to clobber existing C++ providers
+    # that happen to share the same name
+    # else:
+    #     #ensure that the cpp category has no summary providers for gdext types
+    #     remove_all_providers(cpp_category, GDEXT_SUMMARY_PROVIDERS, GDEXT_SYNTHETIC_PROVIDERS)
     register_all_synth_and_summary_providers(module, cpp_category, debugger, SUMMARY_PROVIDERS, SYNTHETIC_PROVIDERS)
     register_all_synth_and_summary_providers(module, rust_category, debugger, GDEXT_SUMMARY_PROVIDERS, GDEXT_SYNTHETIC_PROVIDERS)
     #GDEXT STUFF
@@ -405,6 +435,3 @@ def __lldb_init_module(debugger: SBDebugger, dict):
     SetOptsCommand.register_lldb_command(debugger, __name__, CONTAINER_NAME, FORMATTER_NAME)
     GetOptsCommand.register_lldb_command(debugger, __name__, CONTAINER_NAME, FORMATTER_NAME)
     ReloadCommand.register_lldb_command(debugger, __name__, CONTAINER_NAME, FORMATTER_NAME)
-
-
-
