@@ -414,9 +414,11 @@ def register_all_providers(debugger: SBDebugger):
     if not rust_category:
         print("Failed to enable Rust category, using C++ category instead")
         rust_category = cpp_category
-    else:
-        #ensure that the cpp category has no summary providers for gdext types
-        remove_all_providers(cpp_category, GDEXT_SUMMARY_PROVIDERS, GDEXT_SYNTHETIC_PROVIDERS)
+    # No longer needed, enabling the Rust category now works and we don't want to clobber existing C++ providers
+    # that happen to share the same name
+    # else:
+    #     #ensure that the cpp category has no summary providers for gdext types
+    #     remove_all_providers(cpp_category, GDEXT_SUMMARY_PROVIDERS, GDEXT_SYNTHETIC_PROVIDERS)
     register_all_synth_and_summary_providers(module, cpp_category, debugger, SUMMARY_PROVIDERS, SYNTHETIC_PROVIDERS)
     register_all_synth_and_summary_providers(module, rust_category, debugger, GDEXT_SUMMARY_PROVIDERS, GDEXT_SYNTHETIC_PROVIDERS)
     #GDEXT STUFF
