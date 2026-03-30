@@ -47,14 +47,14 @@ godot_formatters.godot_gdext_providers.get_godot_synthetic_provider_for_type = g
 godot_formatters.godot_gdext_providers.get_godot_summary_provider_for_type = get_summary_provider_for_type
 
 
-from lldb import SBDebugger, SBTypeCategory
-from lldb import (SBCommandReturnObject, SBExecutionContext, SBTypeCategory, eFormatBytes, eFormatCString, eFormatUnicode32, eNoDynamicValues, eDynamicDontRunTarget, eDynamicCanRunTarget, eBasicTypeInvalid, eBasicTypeVoid, eBasicTypeChar, 
+from lldb import SBDebugger, SBTypeCategory  # pyright: ignore[reportMissingModuleSource]
+from lldb import (SBCommandReturnObject, SBExecutionContext, SBTypeCategory, eFormatBytes, eFormatCString, eFormatUnicode32, eNoDynamicValues, eDynamicDontRunTarget, eDynamicCanRunTarget, eBasicTypeInvalid, eBasicTypeVoid, eBasicTypeChar,   # pyright: ignore[reportMissingModuleSource]
                   eBasicTypeSignedChar, eBasicTypeUnsignedChar, eBasicTypeWChar, eBasicTypeSignedWChar, eBasicTypeUnsignedWChar, eBasicTypeChar16, eBasicTypeChar32, 
                   eBasicTypeChar8, eBasicTypeShort, eBasicTypeUnsignedShort, eBasicTypeInt, eBasicTypeUnsignedInt, eBasicTypeLong, eBasicTypeUnsignedLong, eBasicTypeLongLong, 
                   eBasicTypeUnsignedLongLong, eBasicTypeInt128, eBasicTypeUnsignedInt128, eBasicTypeBool, eBasicTypeHalf, eBasicTypeFloat, eBasicTypeDouble, eBasicTypeLongDouble, 
                   eBasicTypeFloatComplex, eBasicTypeDoubleComplex, eBasicTypeLongDoubleComplex, eBasicTypeObjCID, eBasicTypeObjCClass, eBasicTypeObjCSel, eBasicTypeNullPtr, eReturnStatusSuccessFinishNoResult, eReturnStatusSuccessFinishResult, 
                   eTypeClassClass, eTypeClassEnumeration, eTypeClassPointer, eTypeOptionCascade)
-from lldb import ( SBValue, SBAddress, SBData, SBType, SBTypeEnumMember, SBTypeEnumMemberList, SBSyntheticValueProvider, SBError, SBTarget, SBDebugger, SBTypeSummary, SBTypeSynthetic, SBTypeNameSpecifier)
+from lldb import ( SBValue, SBAddress, SBData, SBType, SBTypeEnumMember, SBTypeEnumMemberList, SBSyntheticValueProvider, SBError, SBTarget, SBDebugger, SBTypeSummary, SBTypeSynthetic, SBTypeNameSpecifier)  # pyright: ignore[reportMissingModuleSource]
 
 
 FORMATTER_NAME = "godot_formatter"
@@ -246,7 +246,7 @@ class _LLDBCommandBase:
         print('The "{0}" command has been installed, type "help {0}" for detailed help.'.format(full_program_name))
 
     @classmethod
-    def create_options(cls):
+    def create_options(cls) -> optparse.OptionParser | None:
         return None
 
     def get_short_help(self):
@@ -313,7 +313,7 @@ class SetOptsCommand(_LLDBCommandBase):
     description = "This command sets the options for the Godot formatter script."
 
     @classmethod
-    def create_options(cls):
+    def create_options(cls) -> optparse.OptionParser:
         usage = "usage: %prog [options]"
 
         # Pass add_help_option = False, since this keeps the command in line
@@ -356,6 +356,7 @@ class SetOptsCommand(_LLDBCommandBase):
     def __init__(self, debugger, unused):
         self.parser = self.create_options()
         self.help_string = self.parser.format_help()
+        super().__init__(debugger, unused)
 
     def __call__(
         self,
