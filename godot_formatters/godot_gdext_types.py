@@ -52,11 +52,10 @@ GDEXT_GD_PATTERN:str = "^godot_core::obj::gd::Gd<.+>$"
 GDEXT_RAW_GD_PATTERN:str = "^godot_core::obj::raw_gd::RawGd<.+>$"
 
 # Rust-specific summaries
-RUST_HISTORY_REF_PATTERN: str = "^(::)?.*::HistoryRef$"
-RUST_DOCUMENT_ID_PATTERN: str = "^(::)?.*::DocumentId$"
-RUST_CHANGE_HASH_PATTERN: str = "^(::)?.*::ChangeHash$"
-RUST_UUID_PATTERN: str = "^(::)?.*::Uuid$"
-RUST_UUID_UPPER_PATTERN: str = "^(::)?.*::UUID$"
+RUST_HISTORY_REF_PATTERN: str = "^(::)?(patchwork_rust|patchwork_rust_core)(::helpers::history_ref)?::HistoryRef$"
+RUST_DOCUMENT_ID_PATTERN: str = "^(::)?(samod|samod_core)(::document_id)?::DocumentId$"
+RUST_CHANGE_HASH_PATTERN: str = "^(::)?automerge(::types)?::ChangeHash$"
+RUST_UUID_PATTERN: str = "^(::)?uuid::Uuid$"
 
 
 GDEXT_SYNTHETIC_PROVIDERS: dict[str,type] = {
@@ -99,5 +98,4 @@ GDEXT_SUMMARY_PROVIDERS: dict[str, object] = {
     RUST_DOCUMENT_ID_PATTERN: RustDocumentIdSummaryProvider,
     RUST_CHANGE_HASH_PATTERN: RustChangeHashSummaryProvider,
     RUST_UUID_PATTERN: RustUuidSummaryProvider,
-    RUST_UUID_UPPER_PATTERN: RustUuidSummaryProvider,
 }
