@@ -115,10 +115,12 @@ def get_real_valobj_from_raw_gd(valobj: SBValue) -> SBValue:
     
     obj_pointer = obj.GetChildAtIndex(0)
     if not obj_pointer or not obj_pointer.IsValid():
-        raise Exception("ERROR: Obj pointer is not valid")
+        raise Exception("ERROR: Obj pointer is not valid (valobj: " + str(valobj) + ")")
     val: int = obj_pointer.GetValueAsUnsigned()
     if val == 0:
-        raise Exception("ERROR: Obj pointer is not valid")
+        raise Exception(
+            "ERROR: Obj pointer value is not valid (valobj: " + str(valobj) + ")"
+        )
     return obj_pointer.Cast(variant_cpptype)
 
 class GDExtGDObjectSynthProvider(GodotSynthProvider):
