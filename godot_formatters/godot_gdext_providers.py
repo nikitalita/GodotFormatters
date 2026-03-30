@@ -1,8 +1,8 @@
 # fmt: off
 from types import TracebackType
-from typing import Callable, final, Optional
+from typing import Callable, Generator, final, Optional
 
-from lldb import (SBError, SBValue)
+from lldb import (SBError, SBValue, SBTarget, SBType)
 # fmt: on
 from enum import Enum
 import hashlib
@@ -188,62 +188,6 @@ def GDExtOpaqueSummaryProvider(valobj: SBValue, internal_dict):
 
 _BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
-
-class StdVecSyntheticProvider:
-    """Pretty-printer for alloc::vec::Vec<T>
-
-    struct Vec<T> { buf: RawVec<T>, len: usize }
-    rust 1.75: struct RawVec<T> { ptr: Unique<T>, cap: usize, ... }
-    rust 1.76: struct RawVec<T> { ptr: Unique<T>, cap: Cap(usize), ... }
-    rust 1.31.1: struct Unique<T: ?Sized> { pointer: NonZero<*const T>, ... }
-    rust 1.33.0: struct Unique<T: ?Sized> { pointer: *const T, ... }
-    rust 1.62.0: struct Unique<T: ?Sized> { pointer: NonNull<T>, ... }
-    struct NonZero<T>(T)
-    struct NonNull<T> { pointer: *const T }
-    """
-
-    def __init__(self, valobj: SBValue, _dict: LLDBOpaque):
-        # logger = Logger.Logger()
-        # logger >> "[StdVecSyntheticProvider] for " + str(valobj.GetName())
-        self.valobj = valobj
-        self.element_type = None
-        self.update()
-
-    def num_children(self) -> int:
-        return self.length
-
-    def get_child_index(self, name: str) -> int:
-        index = name.lstrip("[").rstrip("]")
-        if index.isdigit():
-            return int(index)
-        else:
-            return -1
-
-    def get_child_at_index(self, index: int) -> SBValue:
-        start = self.data_ptr.GetValueAsUnsigned()
-        address = start + index * self.element_type_size
-        element = self.data_ptr.CreateValueFromAddress("[%s]" % index, address, self.element_type)
-        return element
-
-    def update(self):
-        self.length = self.valobj.GetChildMemberWithName("len").GetValueAsUnsigned()
-        self.buf = self.valobj.GetChildMemberWithName("buf").GetChildMemberWithName("inner")
-
-        self.data_ptr = unwrap_unique_or_non_null(self.buf.GetChildMemberWithName("ptr"))
-
-        self.element_type = self.valobj.GetType().GetTemplateArgumentType(0)
-
-        if not self.element_type.IsValid():
-            arg_name = next(get_template_args(self.valobj.GetTypeName()))
-
-            self.element_type = resolve_msvc_template_arg(arg_name, self.valobj.target)
-
-        self.element_type_size = self.element_type.GetByteSize()
-
-    def has_children(self) -> bool:
-        return True
-
-
 def _to_byte_list(valobj: Optional[SBValue]) -> Optional[List[int]]:
     if valobj is None or not valobj.IsValid():
         return None
@@ -339,7 +283,6 @@ def _extract_vec_children(valobj: Optional[SBValue]) -> List[SBValue]:
         return []
     # if not synthetic, instantiate a StdVecSyntheticProvider and get the children from that
     if not valobj.IsSynthetic():
-        print("NOT SYNTHETIC!")
         std_vec_provider = StdVecSyntheticProvider(valobj, {})
         count = std_vec_provider.num_children()
         if count == 0:
@@ -433,3 +376,142 @@ def RustUuidSummaryProvider(valobj: SBValue, internal_dict):
         return INVALID_SUMMARY
     hex_str = bytes(raw_bytes).hex()
     return f"{hex_str[0:8]}-{hex_str[8:12]}-{hex_str[12:16]}-{hex_str[16:20]}-{hex_str[20:32]}"
+
+# Copied from Rust providers; used by HistoryRefSummaryProvider if these aren't already available
+
+
+def get_template_args(type_name: str) -> Generator[str, None, None]:
+    """
+    Takes a type name `T<A, tuple$<B, C>, D>` and returns a list of its generic args
+    `["A", "tuple$<B, C>", "D"]`.
+
+    String-based replacement for LLDB's `SBType.template_args`, as LLDB is currently unable to
+    populate this field for targets with PDB debug info. Also useful for manually altering the type
+    name of generics (e.g. `Vec<ref$<str$> >` -> `Vec<&str>`).
+
+    Each element of the returned list can be looked up for its `SBType` value via
+    `SBTarget.FindFirstType()`
+    """
+    level = 0
+    start = 0
+    for i, c in enumerate(type_name):
+        if c == "<":
+            level += 1
+            if level == 1:
+                start = i + 1
+        elif c == ">":
+            level -= 1
+            if level == 0:
+                yield type_name[start:i].strip()
+        elif c == "," and level == 1:
+            yield type_name[start:i].strip()
+            start = i + 1
+
+
+def unwrap_unique_or_non_null(unique_or_nonnull: SBValue) -> SBValue:
+    # BACKCOMPAT: rust 1.32
+    # https://github.com/rust-lang/rust/commit/7a0911528058e87d22ea305695f4047572c5e067
+    # BACKCOMPAT: rust 1.60
+    # https://github.com/rust-lang/rust/commit/2a91eeac1a2d27dd3de1bf55515d765da20fd86f
+    ptr = unique_or_nonnull.GetChildMemberWithName("pointer")
+    return ptr if ptr.TypeIsPointerType() else ptr.GetChildAtIndex(0)
+
+
+MSVC_PTR_PREFIX: List[str] = ["ref$<", "ref_mut$<", "ptr_const$<", "ptr_mut$<"]
+
+
+def resolve_msvc_template_arg(arg_name: str, target: SBTarget) -> SBType:
+    """
+    RECURSIVE when arrays or references are nested (e.g. `ref$<ref$<u8> >`, `array$<ref$<u8> >`)
+
+    Takes the template arg's name (likely from `get_template_args`) and finds/creates its
+    corresponding SBType.
+
+    For non-reference/pointer/array types this is identical to calling
+    `target.FindFirstType(arg_name)`
+
+    LLDB internally interprets refs, pointers, and arrays C-style (`&u8` -> `u8 *`,
+    `*const u8` -> `u8 *`, `[u8; 5]` -> `u8 [5]`). Looking up these names still doesn't work in the
+    current version of LLDB, so instead the types are generated via `base_type.GetPointerType()` and
+    `base_type.GetArrayType()`, which bypass the PDB file and ask clang directly for the type node.
+    """
+    result = target.FindFirstType(arg_name)
+
+    if result.IsValid():
+        return result
+
+    for prefix in MSVC_PTR_PREFIX:
+        if arg_name.startswith(prefix):
+            arg_name = arg_name[len(prefix) : -1].strip()
+
+            result = resolve_msvc_template_arg(arg_name, target)
+            return result.GetPointerType()
+
+    if arg_name.startswith("array$<"):
+        arg_name = arg_name[7:-1].strip()
+
+        template_args = get_template_args(arg_name)
+
+        element_name = next(template_args)
+        length = next(template_args)
+
+        result = resolve_msvc_template_arg(element_name, target)
+
+        return result.GetArrayType(int(length))
+
+    return result
+
+
+class StdVecSyntheticProvider:
+    """Pretty-printer for alloc::vec::Vec<T>
+
+    struct Vec<T> { buf: RawVec<T>, len: usize }
+    rust 1.75: struct RawVec<T> { ptr: Unique<T>, cap: usize, ... }
+    rust 1.76: struct RawVec<T> { ptr: Unique<T>, cap: Cap(usize), ... }
+    rust 1.31.1: struct Unique<T: ?Sized> { pointer: NonZero<*const T>, ... }
+    rust 1.33.0: struct Unique<T: ?Sized> { pointer: *const T, ... }
+    rust 1.62.0: struct Unique<T: ?Sized> { pointer: NonNull<T>, ... }
+    struct NonZero<T>(T)
+    struct NonNull<T> { pointer: *const T }
+    """
+
+    def __init__(self, valobj: SBValue, _dict):
+        # logger = Logger.Logger()
+        # logger >> "[StdVecSyntheticProvider] for " + str(valobj.GetName())
+        self.valobj = valobj
+        self.element_type = None
+        self.update()
+
+    def num_children(self) -> int:
+        return self.length
+
+    def get_child_index(self, name: str) -> int:
+        index = name.lstrip("[").rstrip("]")
+        if index.isdigit():
+            return int(index)
+        else:
+            return -1
+
+    def get_child_at_index(self, index: int) -> SBValue:
+        start = self.data_ptr.GetValueAsUnsigned()
+        address = start + index * self.element_type_size
+        element = self.data_ptr.CreateValueFromAddress("[%s]" % index, address, self.element_type)
+        return element
+
+    def update(self):
+        self.length = self.valobj.GetChildMemberWithName("len").GetValueAsUnsigned()
+        self.buf = self.valobj.GetChildMemberWithName("buf").GetChildMemberWithName("inner")
+
+        self.data_ptr = unwrap_unique_or_non_null(self.buf.GetChildMemberWithName("ptr"))
+
+        self.element_type = self.valobj.GetType().GetTemplateArgumentType(0)
+
+        if not self.element_type.IsValid():
+            arg_name = next(get_template_args(self.valobj.GetTypeName()))
+
+            self.element_type = resolve_msvc_template_arg(arg_name, self.valobj.target)
+
+        self.element_type_size = self.element_type.GetByteSize()
+
+    def has_children(self) -> bool:
+        return True
