@@ -295,11 +295,11 @@ def _extract_vec_children(valobj: Optional[SBValue]) -> List[SBValue]:
         if count == 0:
             print("NO CHILDREN for history ref")
             return []
-        children: List[SBValue] = []
+        children_list: List[SBValue] = []
         for i in range(count):
             child = std_vec_provider.get_child_at_index(i)
-            children.append(child)
-        return children
+            children_list.append(child)
+        return children_list
 
     count = valobj.GetNumChildren()
     if count == 0:
@@ -486,7 +486,7 @@ class StdVecSyntheticProvider:
         # logger = Logger.Logger()
         # logger >> "[StdVecSyntheticProvider] for " + str(valobj.GetName())
         self.valobj = valobj
-        self.element_type = None
+        self.element_type: SBType | None = None
         self.update()
 
     def num_children(self) -> int:
@@ -500,6 +500,8 @@ class StdVecSyntheticProvider:
             return -1
 
     def get_child_at_index(self, index: int) -> SBValue:
+        if not self.element_type or not self.data_ptr:
+            return SBValue()
         start = self.data_ptr.GetValueAsUnsigned()
         address = start + index * self.element_type_size
         element = self.data_ptr.CreateValueFromAddress("[%s]" % index, address, self.element_type)
