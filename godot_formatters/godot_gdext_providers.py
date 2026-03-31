@@ -170,7 +170,12 @@ class GDExtBaseGDObjectSynthProvider(GDExtGDObjectSynthProvider):
 def GDExtRIDSummaryProvider(valobj: SBValue, internal_dict):
     # TODO: support non-clang enums
     child = valobj.GetChildAtIndex(0).GetChildAtIndex(0).GetChildAtIndex(0).GetChildAtIndex(0).GetChildAtIndex(0).GetChildAtIndex(0)
-    return "<RID=" + str(child.GetValueAsUnsigned()) + ">"
+    value = 0
+    if child and child.IsValid():
+        value = child.GetValueAsUnsigned()
+    if value == 0:
+        return "<RID=INVALID>"
+    return "<RID=" + str(value) + ">"
 
 def GDExtGenericSummaryProvider(valobj: SBValue, internal_dict):
     type_name = get_godot_type_name(valobj)
