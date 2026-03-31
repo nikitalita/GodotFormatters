@@ -7,10 +7,6 @@ from godot_formatters.godot_gdext_providers import (
     GDExtOpaqueSummaryProvider,
     GDExtRIDSummaryProvider,
     GDExtGDObjectSynthProvider,
-    RustChangeHashSummaryProvider,
-    RustDocumentIdSummaryProvider,
-    RustHistoryRefSummaryProvider,
-    RustUuidSummaryProvider,
 )
 
 # opaque types with synthetic providers
@@ -93,9 +89,4 @@ GDEXT_SUMMARY_PROVIDERS: dict[str, object] = {
     GDEXT_RECT2I_PATTERN: GDExtGenericSummaryProvider,
     GDEXT_COLOR_PATTERN: GDExtGenericSummaryProvider,
     GDEXT_RID_PATTERN: GDExtRIDSummaryProvider,
-    # rust types
-    RUST_HISTORY_REF_PATTERN: RustHistoryRefSummaryProvider,
-    RUST_DOCUMENT_ID_PATTERN: RustDocumentIdSummaryProvider,
-    RUST_CHANGE_HASH_PATTERN: RustChangeHashSummaryProvider,
-    RUST_UUID_PATTERN: RustUuidSummaryProvider,
 }
