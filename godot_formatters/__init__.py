@@ -119,13 +119,8 @@ def attach_synthetic_to_type(module, category: SBTypeCategory, type_name, synth_
         return get_synth_summary(synth_class, valobj, dict)
 
     # LLDB accesses summary fn's by name, so we need to create a unique one.
-    summary_fn.__name__ = "_get_synth_summary_" + synth_class.__name__
-    setattr(module, summary_fn.__name__, summary_fn)
-    print_trace(f"attaching summary {summary_fn.__name__} to {type_name}, is_regex={is_regex}")
-    summary = SBTypeSummary.CreateWithFunctionName(__name__ + "." + summary_fn.__name__)
-    summary.SetOptions(eTypeOptionCascade)
-    if not category.AddTypeSummary(SBTypeNameSpecifier(type_name, is_regex), summary):
-        print(f"Failed to add summary for {type_name}")
+    real_fn_name = "_get_synth_summary_" + synth_class.__name__
+    attach_summary_to_type(module, category, type_name, summary_fn, is_regex, real_fn_name)
 
     # attach_summary_to_type(summary_fn, type_name, is_regex)
 
@@ -133,7 +128,8 @@ def attach_synthetic_to_type(module, category: SBTypeCategory, type_name, synth_
 def attach_summary_to_type(module, category: SBTypeCategory, type_name, real_summary_fn, is_regex=False, real_fn_name: Optional[str] = None):
     if not real_fn_name:
         real_fn_name = str(real_summary_fn.__qualname__)
-    def __spfunc(valobj, dict):
+    # LLDB recently added an optional "options" parameter to summary functions, but we don't use it yet
+    def __spfunc(valobj, dict, _options = None):
         try:
             return real_summary_fn(valobj, dict)
         except Exception as e:
