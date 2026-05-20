@@ -42,7 +42,7 @@ def get_working_dir_and_environment(debugger: SBDebugger) -> tuple[str | None, d
 def install_rust_visualizers(debugger: SBDebugger, internal_dict):
     # try to install the rust visualizers; if the category "Rust" already exists, or if we're able to import "codelldb", don't do anything
     rust_category = debugger.GetCategory("Rust")
-    if rust_category:
+    if rust_category and (rust_category.GetNumSummaries() > 0 or rust_category.GetNumSynthetics() > 0):
         print_message("Rust category already exists, skipping installation")
         return
     try:
@@ -64,16 +64,17 @@ def install_rust_visualizers(debugger: SBDebugger, internal_dict):
 
     try:
         working_dir, environment = get_working_dir_and_environment(debugger)
-            
+
         si = None
         if hasattr(subprocess, 'STARTUPINFO'):
             si = subprocess.STARTUPINFO(dwFlags=subprocess.STARTF_USESHOWWINDOW,  # type: ignore
                                         wShowWindow=subprocess.SW_HIDE)  # type: ignore
         sysroot = subprocess.check_output(command, startupinfo=si, encoding='utf-8', cwd=working_dir, env=environment).strip()
 
-
         formatters = path.join(sysroot, 'lib/rustlib/etc')
         lldb_lookup = path.join(formatters, 'lldb_lookup.py')
+        lldb_providers = path.join(formatters, "lldb_providers.py")
+        lldb_rust_types = path.join(formatters, "rust_types.py")
         lldb_commands = path.join(formatters, 'lldb_commands')
         if not path.isfile(lldb_lookup):
             if sysroot:
@@ -82,6 +83,8 @@ def install_rust_visualizers(debugger: SBDebugger, internal_dict):
                 print_message("Could not find sysroot")
             return
         debugger.HandleCommand(command="command script import '{}'".format(lldb_lookup))
+        debugger.HandleCommand(command="command script import '{}'".format(lldb_providers))
+        debugger.HandleCommand(command="command script import '{}'".format(lldb_rust_types))
         use_recognizer_fn = version_major >= 19 and hasattr(internal_dict['lldb_lookup'], 'classify_rust_type')
         with open(lldb_commands, 'rt') as f:
             for line in f:
@@ -92,11 +95,9 @@ def install_rust_visualizers(debugger: SBDebugger, internal_dict):
                 debugger.HandleCommand(line.strip())
         print_message("Installed successfully!")
 
-
     except Exception as e:
         print_message(f"Error initializing Rust sysroot: {e}")
         return
-    
+
 def __lldb_init_module(debugger: SBDebugger, dict):
     install_rust_visualizers(debugger, dict)
-
