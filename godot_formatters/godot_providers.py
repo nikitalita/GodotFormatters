@@ -601,30 +601,53 @@ def Callable_SummaryProvider(valobj: SBValue, internal_dict):
             return "{{<Callable> object:{0}, method:{1}}}".format(obj_id_val, method_name)
 
 
+def get_floats_from_data(data: SBData, use_double: bool) -> list[float]:
+    floats = []
+    float_size = 8 if use_double else 4
+    count = data.GetByteSize() // float_size
+    for i in range(count):
+        if use_double:
+            floats.append(data.GetDouble(SBError(), i * float_size))
+        else:
+            floats.append(data.GetFloat(SBError(), i * float_size))
+    return floats
+
+def get_floats_for_vectors(valobj: SBValue, member_names: list[str]) -> list[float]:
+    floats: list[float] = []
+    # the union discriminator in LLDB is screwy, so if the first child is not valid,
+    # then we should just get the raw data and parse it ourselves
+    if not not_null_check(valobj.GetChildAtIndex(0)):
+        data = valobj.GetData()
+        use_double = data.GetByteSize() == (8 * len(member_names))
+        floats = get_floats_from_data(data, use_double)
+    else:
+        for member_name in member_names:
+            floats.append(GetFloat(valobj.GetChildMemberWithName(member_name)))
+    return floats
+
 @print_trace_dec
 def Vector2_SummaryProvider(valobj: SBValue, internal_dict):
-    return "({0}, {1})".format(
-        GetFloat(valobj.GetChildMemberWithName("x")),
-        GetFloat(valobj.GetChildMemberWithName("y")),
-    )
+    floats = get_floats_for_vectors(valobj, ["x", "y"])
+    return "({0}, {1})".format(floats[0], floats[1])
 
 
 @print_trace_dec
 def Vector3_SummaryProvider(valobj: SBValue, internal_dict):
+    floats = get_floats_for_vectors(valobj, ["x", "y", "z"])
     return "({0}, {1}, {2})".format(
-        GetFloat(valobj.GetChildMemberWithName("x")),
-        GetFloat(valobj.GetChildMemberWithName("y")),
-        GetFloat(valobj.GetChildMemberWithName("z")),
+        floats[0],
+        floats[1],
+        floats[2],
     )
-
 
 @print_trace_dec
 def Vector4_SummaryProvider(valobj: SBValue, internal_dict):
+    floats = get_floats_for_vectors(valobj, ["x", "y", "z", "w"])
     return "({0}, {1}, {2}, {3})".format(
-        GetFloat(valobj.GetChildMemberWithName("x")),
-        GetFloat(valobj.GetChildMemberWithName("y")),
-        GetFloat(valobj.GetChildMemberWithName("z")),
-        GetFloat(valobj.GetChildMemberWithName("w")),
+        floats[0],
+        floats[1],
+        floats[2],
+        floats[3],
     )
 
 
@@ -729,11 +752,12 @@ def GetHexColor(r, g, b, a) -> str:
 
 
 def GetColorVals(valobj: SBValue):
+    floats = get_floats_for_vectors(valobj, ["r", "g", "b", "a"])
     return (
-        GetFloat(valobj.GetChildMemberWithName("r")),
-        GetFloat(valobj.GetChildMemberWithName("g")),
-        GetFloat(valobj.GetChildMemberWithName("b")),
-        GetFloat(valobj.GetChildMemberWithName("a")),
+        floats[0],
+        floats[1],
+        floats[2],
+        floats[3],
     )
 
 
