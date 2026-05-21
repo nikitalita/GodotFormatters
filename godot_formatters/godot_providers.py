@@ -882,7 +882,7 @@ def CharString_SummaryProvider(valobj: SBValue, internal_dict):
         return INVALID_SUMMARY
     if size == 0:
         return EMPTY_SUMMARY
-    template_type = type.GetTemplateArgumentType(0)
+    template_type: int = type.template_args[0].GetBasicType()
     format = eFormatCString
     if template_type == eBasicTypeChar16 or template_type == eBasicTypeWChar:
         format = eFormatUnicode16
