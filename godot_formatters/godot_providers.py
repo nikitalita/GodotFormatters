@@ -58,8 +58,21 @@ UINT32_MAX = 4294967295
 INT32_MAX = 2147483647
 
 
+def get_summary_or_none_safe(valobj: SBValue, internal_dict: dict[Any, Any] = {}, _options = None) -> Optional[str]:
+    if not not_null_check(valobj):
+        return INVALID_SUMMARY
+    provider = get_summary_provider_for_type(valobj.GetType().GetName())
+    if provider is None:
+        if (is_basic_printable_type(valobj.GetType())):
+            return get_basic_printable_string(valobj)
+        return None
+    return provider(valobj, internal_dict)
 
-
+def get_summary_safe(valobj: SBValue, internal_dict: dict[Any, Any] = {}, _options = None) -> str:
+    summ = get_summary_or_none_safe(valobj, internal_dict, _options)
+    if summ is None:
+        return "{...}"
+    return summ
 
 # ********************************************************
 # SUMMARY PROVIDERS
@@ -466,7 +479,7 @@ class Variant_SyntheticProvider(GodotSynthProvider):
             # return prefix + GenericShortSummary(data, self.internal_dict, len(prefix)+1, True) + "}"
             return prefix + "{...}}"
         else:
-            summary = data.GetSummary()
+            summary = get_summary_safe(data, self.internal_dict)
             if not summary:
                 summary = "{" + data.GetDisplayTypeName() + ":{...}}"
             return summary
@@ -496,19 +509,13 @@ def StringName_SummaryProvider(valobj: SBValue, internal_dict):
     # `cname` was removed in 4.6
     cname = _data.GetChildMemberWithName("cname")
     if not not_null_check(cname) or cname.GetValueAsSigned() == 0:
-        return _data.GetChildMemberWithName("name").GetSummary()
+        return get_summary_safe(_data.GetChildMemberWithName("name"), internal_dict)
     else:
-        return _data.GetChildMemberWithName("cname").GetSummary()
+        return get_summary_safe(_data.GetChildMemberWithName("cname"), internal_dict)
 
 
 def Ref_SummaryProvider(valobj: SBValue, internal_dict):
     return GenericShortSummary(valobj, internal_dict)
-
-def get_summary_or_invalid_summary(valobj: SBValue) -> str:
-    if not not_null_check(valobj):
-        return INVALID_SUMMARY
-    summary = valobj.GetSummary()
-    return summary
 
 def NodePath_SummaryProvider(valobj: SBValue, internal_dict):
     rstr = ""
@@ -530,14 +537,14 @@ def NodePath_SummaryProvider(valobj: SBValue, internal_dict):
         rstr = "/"
     for i in range(path_size):
         child = path.get_child_at_index(i)
-        rstr += strip_quotes(get_summary_or_invalid_summary(child))
+        rstr += strip_quotes(get_summary_safe(child, internal_dict))
         if i < path.num_children() - 1:
             rstr += "/"
     if subpath_size > 0:
         rstr += ":"
     for i in range(subpath_size):
         child = subpath.get_child_at_index(i)
-        rstr += strip_quotes(get_summary_or_invalid_summary(child))
+        rstr += strip_quotes(get_summary_safe(child, internal_dict))
         if i < subpath_size - 1:
             rstr += ":"
     return rstr
@@ -570,7 +577,7 @@ def Signal_SummaryProvider(valobj: SBValue, internal_dict):
     # Signal has a StringName name and an ObjectID object
     name: SBValue = valobj.GetChildMemberWithName("name")
     object: SBValue = valobj.GetChildMemberWithName("object")
-    name_summary, object_summary = name.GetSummary(), object.GetSummary()
+    name_summary, object_summary = get_summary_safe(name, internal_dict), get_summary_safe(object, internal_dict)
     if not name_summary or not object_summary:
         return INVALID_SUMMARY
     if NULL_SUMMARY in name_summary and NULL_SUMMARY in object_summary:
@@ -582,7 +589,7 @@ def Signal_SummaryProvider(valobj: SBValue, internal_dict):
 def Callable_SummaryProvider(valobj: SBValue, internal_dict):
     # If `method` is blank, and `custom` is not a null pointer, then it's a CallableCustom
     method: SBValue = valobj.GetChildMemberWithName("method")  # StringName
-    method_name: str = method.GetSummary()
+    method_name: str = get_summary_safe(method, internal_dict)
     if method_name == NULL_SUMMARY or method_name == EMPTY_SUMMARY:
         custom: SBValue = valobj.GetChildMemberWithName("custom")
         if custom.GetValueAsUnsigned() != 0:
@@ -704,7 +711,7 @@ def ConstructNamedColorTable(global_named_colors_table: SBValue) -> dict[str, st
         for i in range(global_named_colors_table.GetNumChildren()):
             named_color = ValCheck(global_named_colors_table.GetChildAtIndex(i))
             name_val = ValCheck(named_color.GetChildMemberWithName("name"))
-            name_val_summary = name_val.GetSummary()
+            name_val_summary = get_summary_safe(name_val)
             if not name_val_summary:  # nullptr at the end of the array
                 break
             name = strip_quotes(name_val_summary)
@@ -774,7 +781,7 @@ def Color_SummaryProvider(valobj: SBValue, internal_dict):
 @print_trace_dec
 def Plane_SummaryProvider(valobj: SBValue, internal_dict):
     return "{{normal: {0}, d: {1}}}".format(
-        valobj.GetChildMemberWithName("normal").GetSummary(),
+        get_summary_safe(valobj.GetChildMemberWithName("normal"), internal_dict),
         valobj.GetChildMemberWithName("d").GetValueAsSigned(),
     )
 
@@ -782,8 +789,8 @@ def Plane_SummaryProvider(valobj: SBValue, internal_dict):
 @print_trace_dec
 def AABB_SummaryProvider(valobj: SBValue, internal_dict):
     return "{{position: {{{0}}}, size: {{{1}}}}}".format(
-        valobj.GetChildMemberWithName("position").GetSummary(),
-        valobj.GetChildMemberWithName("size").GetSummary(),
+        get_summary_safe(valobj.GetChildMemberWithName("position"), internal_dict),
+        get_summary_safe(valobj.GetChildMemberWithName("size"), internal_dict),
     )
 
 
@@ -793,15 +800,15 @@ def Transform2D_SummaryProvider(valobj: SBValue, internal_dict):
     x_row = valobj.GetChildMemberWithName("columns").GetChildAtIndex(0)
     y_row = valobj.GetChildMemberWithName("columns").GetChildAtIndex(1)
     o_row = valobj.GetChildMemberWithName("columns").GetChildAtIndex(2)
-    return "{{x: {0}, y: {1}, o: {2}}}".format(x_row.GetSummary(), y_row.GetSummary(), o_row.GetSummary())
+    return "{{x: {0}, y: {1}, o: {2}}}".format(get_summary_safe(x_row, internal_dict), get_summary_safe(y_row, internal_dict), get_summary_safe(o_row, internal_dict))
 
 
 @print_trace_dec
 def Transform3D_SummaryProvider(valobj: SBValue, internal_dict):
     # transform3d has a Basis `basis` and Vector3 `origin`
     return "{{basis: {0}, origin: {1}}}".format(
-        valobj.GetChildMemberWithName("basis").GetSummary(),
-        valobj.GetChildMemberWithName("origin").GetSummary(),
+        get_summary_safe(valobj.GetChildMemberWithName("basis"), internal_dict),
+        get_summary_safe(valobj.GetChildMemberWithName("origin"), internal_dict),
     )
 
 
@@ -809,10 +816,10 @@ def Transform3D_SummaryProvider(valobj: SBValue, internal_dict):
 def Projection_SummaryProvider(valobj: SBValue, internal_dict):
     # projection has 	`Vector4 columns[4]`
     return "{{columns: {{{0}, {1}, {2}, {3}}}}}".format(
-        valobj.GetChildMemberWithName("columns").GetChildAtIndex(0).GetSummary(),
-        valobj.GetChildMemberWithName("columns").GetChildAtIndex(1).GetSummary(),
-        valobj.GetChildMemberWithName("columns").GetChildAtIndex(2).GetSummary(),
-        valobj.GetChildMemberWithName("columns").GetChildAtIndex(3).GetSummary(),
+        get_summary_safe(valobj.GetChildMemberWithName("columns").GetChildAtIndex(0), internal_dict),
+        get_summary_safe(valobj.GetChildMemberWithName("columns").GetChildAtIndex(1), internal_dict),
+        get_summary_safe(valobj.GetChildMemberWithName("columns").GetChildAtIndex(2), internal_dict),
+        get_summary_safe(valobj.GetChildMemberWithName("columns").GetChildAtIndex(3), internal_dict),
     )
 
 
@@ -823,7 +830,7 @@ def Basis_SummaryProvider(valobj: SBValue, internal_dict):
     x_row = valobj.GetChildMemberWithName("rows").GetChildAtIndex(0)
     y_row = valobj.GetChildMemberWithName("rows").GetChildAtIndex(1)
     z_row = valobj.GetChildMemberWithName("rows").GetChildAtIndex(2)
-    return "{{{0}, {1}, {2}}}".format(x_row.GetSummary(), y_row.GetSummary(), z_row.GetSummary())
+    return "{{{0}, {1}, {2}}}".format(get_summary_safe(x_row, internal_dict), get_summary_safe(y_row, internal_dict), get_summary_safe(z_row, internal_dict))
 
 
 @print_trace_dec
@@ -891,10 +898,7 @@ def CharString_SummaryProvider(valobj: SBValue, internal_dict):
     _ptr: SBValue = _cowdata.GetChildMemberWithName("_ptr")
     _ptr.format = format
     if Opts.SANITIZE_STRING_SUMMARY:
-        ret = _ptr.GetSummary()
-        if ret is None:  # pyright: ignore[reportUnnecessaryComparison]
-            print_trace("String_SummaryProvider: _ptr.GetSummary() returned None")
-            return EMPTY_SUMMARY
+        ret = get_summary_safe(_ptr, internal_dict)
         if ret.startswith('U"'):
             ret = '"' + ret.removeprefix('U"')
         return ret
@@ -999,7 +1003,7 @@ def GenericShortSummary(
             return unqual_type_name + "{...}"
     else:
         try:
-            summ = valobj.GetSummary()
+            summ = get_summary_or_none_safe(valobj, internal_dict)
         except Exception as e:
             summ = " GetSummary() EXCEPTION: " + str(e)
             summ += " " + str(valobj.GetDisplayTypeName())
