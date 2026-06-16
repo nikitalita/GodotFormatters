@@ -835,7 +835,7 @@ def RID_SummaryProvider(valobj: SBValue, internal_dict):
 def String_SummaryProvider(valobj: SBValue, internal_dict):
     _cowdata: SBValue = valobj.GetChildMemberWithName("_cowdata")
     size = get_cowdata_size_or_none(_cowdata)
-    if size is None:
+    if size is None or size < 0:
         # check if this is a pointer to a pointer
         type = valobj.GetType()
         if type.IsPointerType() and type.GetPointeeType().IsPointerType():
@@ -851,20 +851,17 @@ def String_SummaryProvider(valobj: SBValue, internal_dict):
     _ptr.format = eFormatUnicode32
     data = _ptr.GetPointeeData(0, size)
     error: SBError = SBError()
-    arr: bytearray = bytearray()
-    for i in range(data.size):
-        var = data.GetUnsignedInt8(error, i)
-        arr.append(var)
-    starr = arr.decode("utf-32LE")
+    arr = data.ReadRawData(error, 0, size * 4)
+    try:
+        starr = arr.decode("utf-32LE")
+    except:
+        return INVALID_SUMMARY
     if starr.endswith("\x00"):
         starr = starr[:-1]
     if Opts.SANITIZE_STRING_SUMMARY: # Sanitize string summaries to escape all formatting characters and quotes
         new_str = ""
         for char in starr:
-            if ord(char) < 32 or char == '"':
-                new_str += '\\' + char
-            else:
-                new_str += char
+            new_str += escape_char(char)
         starr = new_str
     return '"{0}"'.format(starr)
 

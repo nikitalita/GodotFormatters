@@ -266,6 +266,29 @@ def trace_none_if_invalid_dec(func):
 # UTILITIES
 # ********************************************************
 
+def escape_char(char: str) -> str:
+    if ord(char) < 32 or char == '"':
+        match ord(char):
+            case 0x0a:
+                return '\\n'
+            case 0x0d:
+                return '\\r'
+            case 0x09:
+                return '\\t'
+            case 0x08:
+                return '\\b'
+            case 0x0c:
+                return '\\f'
+            case 0x0b:
+                return '\\v'
+            case 0x07:
+                return '\\a'
+            case 0x1b:
+                return '\\e'
+            case _:
+                return '\\' + char
+    return char
+
 
 @print_trace_dec
 def should_use_key_val_style(key_template_type) -> bool:
