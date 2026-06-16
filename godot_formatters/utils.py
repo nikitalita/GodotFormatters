@@ -319,7 +319,10 @@ def GetFloatStr(valobj: SBValue, short: bool = False) -> str:
 def is_basic_printable_type(type: SBType):
     if type.GetTypeClass() == eTypeClassEnumeration:
         return True
-
+    if is_basic_string_type(type):
+        return True
+    if type.IsPointerType():
+        return is_basic_printable_type(type.GetPointeeType())
     basic_type = type.GetCanonicalType().GetBasicType()
     if basic_type == eBasicTypeVoid:
         return False
@@ -338,10 +341,10 @@ def is_basic_string_type(type: SBType):
     # check to see if it's a const char*, const wchar_t*, const char16_t*, const char32_t*
     if not type.IsPointerType():
         return False
-    if not "const" in type.name:
-        return False
-    basic_type = type.GetCanonicalType().GetBasicType()
-    if basic_type == eBasicTypeChar:
+    basic_type = type.GetPointeeType().GetCanonicalType().GetBasicType()
+    if basic_type == eBasicTypeUnsignedChar:
+        return True
+    if basic_type == eBasicTypeChar or basic_type == eBasicTypeSignedChar:
         return True
     if basic_type == eBasicTypeWChar:
         return True
@@ -436,13 +439,40 @@ def get_enum_string(valobj: SBValue) -> str:
             return name  # + " (" + str(starting_value) + ")"
     return "<Invalid Enum> (" + str(starting_value) + ")"
 
+def get_basic_string_type_string(valobj: SBValue) -> str:
+    if not not_null_check(valobj):
+        return INVALID_SUMMARY
+    # TODO: Do this without calling GetSummary()??
+    return str(valobj.GetSummary())
 
 def get_basic_printable_string(valobj: SBValue) -> str:
     type: SBType = valobj.GetType()
     if type.GetTypeClass() == eTypeClassEnumeration:
         return get_enum_string(valobj)
-    # char_pointer_type: SBType = valobj.target.GetBasicType(eBasicTypeChar).GetPointerType()
-
+    if is_basic_string_type(type):
+        # return f'0x{valobj.GetValueAsUnsigned():016x} {get_basic_string_type_string(valobj)}'
+        return get_basic_string_type_string(valobj)
+    summary = ""
+    if (type.IsPointerType()):
+        addr = valobj.GetValueAsUnsigned()
+        addr_str = f"0x{addr:x}"
+        # summary = f"{valobj.GetType().GetPointeeType().GetDisplayTypeName()} @ {addr_str} "
+        summary = f"{addr_str} "
+        if (addr == 0):
+            return summary + NULL_SUMMARY
+        try:
+            obj = valobj.Dereference()
+        except:
+            return summary + INVALID_SUMMARY
+        if not not_null_check(obj):
+            return summary + INVALID_SUMMARY
+        else:
+            new_summary = get_basic_printable_string(obj)
+            if new_summary.startswith("<"):
+                summary += new_summary
+            else:
+                summary += "(" + new_summary + ")"
+        return summary
     basic_type = type.GetCanonicalType().GetBasicType()
     if basic_type == eBasicTypeInvalid:
         return INVALID_SUMMARY
