@@ -9,7 +9,7 @@ import weakref
 from typing import TypeVar, Generic, List
 
 from godot_formatters.options import Opts, INVALID_SUMMARY, NIL_SUMMARY
-from godot_formatters.utils import print_verbose
+from godot_formatters.utils import GodotSummaryOptions, print_verbose
 from godot_formatters.godot_providers import GenericShortSummary, get_synth_provider_for_object, GodotSynthProvider
 
 UINT32_MAX = 4294967295
@@ -84,8 +84,8 @@ class GDExtGenericSynthProvider(GodotSynthProvider):
             return None
         self.synth_provider = get_synth_provider_for_object(cls=self.synth_provider_type, valobj=self.real_valobj, internal_dict=self.internal_dict, is_summary=self.is_summary)
 
-    def get_summary(self, max_children=UINT32_MAX, max_str_len=Opts.SUMMARY_STRING_MAX_LENGTH):
-        return self.synth_provider.get_summary(max_children, max_str_len)
+    def get_summary(self, _options: GodotSummaryOptions):
+        return self.synth_provider.get_summary(_options)
 
     def num_children(self, max=UINT32_MAX):
         return self.synth_provider.num_children(max)
@@ -137,8 +137,8 @@ class GDExtGDObjectSynthProvider(GodotSynthProvider):
     def update(self):
         self.real_valobj = get_real_valobj_from_raw_gd(self.valobj)
 
-    def get_summary(self, max_children=UINT32_MAX, max_str_len=Opts.SUMMARY_STRING_MAX_LENGTH):
-        return GenericShortSummary(self.real_valobj, self.internal_dict, max_str_len, False, False)
+    def get_summary(self, _options: GodotSummaryOptions):
+        return GenericShortSummary(self.real_valobj, self.internal_dict, _options, False, False)
 
     def num_children(self, max=UINT32_MAX):
         return 1
@@ -166,7 +166,7 @@ class GDExtBaseGDObjectSynthProvider(GDExtGDObjectSynthProvider):
         self.real_valobj = get_real_valobj_from_raw_gd(value)
 
 
-def GDExtRIDSummaryProvider(valobj: SBValue, internal_dict):
+def GDExtRIDSummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     # TODO: support non-clang enums
     child = valobj.GetChildAtIndex(0).GetChildAtIndex(0).GetChildAtIndex(0).GetChildAtIndex(0).GetChildAtIndex(0).GetChildAtIndex(0)
     value = 0
@@ -176,17 +176,17 @@ def GDExtRIDSummaryProvider(valobj: SBValue, internal_dict):
         return "<RID=INVALID>"
     return "<RID=" + str(value) + ">"
 
-def GDExtGenericSummaryProvider(valobj: SBValue, internal_dict):
+def GDExtGenericSummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     type_name = get_godot_type_name(valobj)
     summary_provider = get_godot_summary_provider_for_type(type_name)
     if "RID" in type_name:
-        return GDExtRIDSummaryProvider(valobj, internal_dict)
+        return GDExtRIDSummaryProvider(valobj, internal_dict, _options)
     if summary_provider is None:
         raise Exception(f"ERROR: Summary provider for {valobj.GetType().GetName()} is not valid ({type_name})")
-    return summary_provider(valobj, internal_dict)
+    return summary_provider(valobj, internal_dict, _options)
 
-def GDExtOpaqueSummaryProvider(valobj: SBValue, internal_dict):
+def GDExtOpaqueSummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     real_valobj = get_real_valobj_from_opaque_member(valobj)
     if real_valobj is None or not real_valobj.IsValid():
         raise Exception(f"ERROR: opaque.container for {valobj.GetType().GetName()} is not valid ({get_godot_type_name(valobj)})")
-    return GDExtGenericSummaryProvider(real_valobj, internal_dict)
+    return GDExtGenericSummaryProvider(real_valobj, internal_dict, _options)

@@ -16,7 +16,7 @@ import json
 from enum import Enum
 import weakref
 from types import TracebackType
-from typing import Any, Callable, Generic, Never, TypeVar, final, Optional
+from typing import Any, Callable, Generic, Never, TypeVar, TypedDict, final, Optional
 
 # fmt: off
 from lldb import (SBCommandReturnObject, SBExecutionContext, SBPlatform, SBTypeCategory, SBValue, eFormatBytes, eFormatCString, eFormatUnicode16, eFormatUnicode32, eNoDynamicValues, eDynamicDontRunTarget, eDynamicCanRunTarget, eBasicTypeInvalid, eBasicTypeVoid, eBasicTypeChar,  # pyright: ignore[reportMissingModuleSource]
@@ -58,17 +58,32 @@ UINT32_MAX = 4294967295
 INT32_MAX = 2147483647
 
 
-def get_summary_or_none_safe(valobj: SBValue, internal_dict: dict[Any, Any] = {}, _options = None) -> Optional[str]:
+class SummaryResult(Enum):
+    INVALID = -1,
+    NONE = 0,
+    BASIC = 1,
+    SUMMARY = 2,
+    SYNTHETIC = 3,
+
+
+
+def get_summary_or_none_safe(valobj: SBValue, internal_dict: dict[Any, Any], _options: GodotSummaryOptions) -> Optional[str]:
     if not not_null_check(valobj):
         return INVALID_SUMMARY
+    synth_provider_type = get_synthetic_provider_for_type(valobj.GetType().GetName())
+    if synth_provider_type is not None:
+        synth: GodotSynthProvider = synth_provider_type(valobj, internal_dict, True)
+        summary = synth.get_summary(_options)
+        return summary
+
     provider = get_summary_provider_for_type(valobj.GetType().GetName())
     if provider is None:
         if (is_basic_printable_type(valobj.GetType())):
             return get_basic_printable_string(valobj)
         return None
-    return provider(valobj, internal_dict)
+    return provider(valobj, internal_dict, _options)
 
-def get_summary_safe(valobj: SBValue, internal_dict: dict[Any, Any] = {}, _options = None) -> str:
+def get_summary_safe(valobj: SBValue, internal_dict: dict[Any, Any], _options: GodotSummaryOptions) -> str:
     summ = get_summary_or_none_safe(valobj, internal_dict, _options)
     if summ is None:
         return "{...}"
@@ -346,7 +361,7 @@ def Variant_GetValue(valobj: SBValue):
 
 
 class _SBSyntheticValueProviderWithSummary(SBSyntheticValueProvider):
-    def get_summary(self, max_children=Opts.MAX_AMOUNT_OF_CHILDREN_IN_SUMMARY, max_str_len=Opts.SUMMARY_STRING_MAX_LENGTH) -> str:
+    def get_summary(self, _options: GodotSummaryOptions) -> str:
         raise Exception("Not implemented")
 
     def check_valid(self, obj: SBValue) -> bool:
@@ -405,10 +420,10 @@ class GodotSynthProvider(_SBSyntheticValueProviderWithSummary):
 
     # _SBSyntheticValueProviderWithSummary
     @print_trace_dec
-    def get_summary(self, max_children=Opts.MAX_AMOUNT_OF_CHILDREN_IN_SUMMARY, max_str_len=Opts.SUMMARY_STRING_MAX_LENGTH) -> str:
+    def get_summary(self, _options: GodotSummaryOptions) -> str:
         if not self.check_valid(self.valobj):
             return INVALID_SUMMARY
-        return GenericShortSummary(self.valobj, self.internal_dict, summary_length=max_str_len, no_children=True)
+        return GenericShortSummary(self.valobj, self.internal_dict, _options, no_children=True)
 
     def check_valid(self, obj: SBValue) -> bool:
         print("check_valid not implemented")
@@ -458,7 +473,7 @@ class Variant_SyntheticProvider(GodotSynthProvider):
         self.variant_type = self._get_variant_type()
 
     @print_trace_dec
-    def get_summary(self, max_children=Opts.MAX_AMOUNT_OF_CHILDREN_IN_SUMMARY, max_str_len=Opts.SUMMARY_STRING_MAX_LENGTH):
+    def get_summary(self, _options: GodotSummaryOptions):
         if not self.check_valid(self.valobj):
             return INVALID_SUMMARY
         type = self.variant_type
@@ -479,7 +494,7 @@ class Variant_SyntheticProvider(GodotSynthProvider):
             # return prefix + GenericShortSummary(data, self.internal_dict, len(prefix)+1, True) + "}"
             return prefix + "{...}}"
         else:
-            summary = get_summary_safe(data, self.internal_dict)
+            summary = get_summary_safe(data, self.internal_dict, _options)
             if not summary:
                 summary = "{" + data.GetDisplayTypeName() + ":{...}}"
             return summary
@@ -502,22 +517,22 @@ class Variant_SyntheticProvider(GodotSynthProvider):
         return self.data or SBValue()
 
 
-def StringName_SummaryProvider(valobj: SBValue, internal_dict):
+def StringName_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     _data: SBValue = valobj.GetChildMemberWithName("_data")
     if _data.GetValueAsUnsigned() == 0:
         return NULL_SUMMARY
     # `cname` was removed in 4.6
     cname = _data.GetChildMemberWithName("cname")
     if not not_null_check(cname) or cname.GetValueAsSigned() == 0:
-        return get_summary_safe(_data.GetChildMemberWithName("name"), internal_dict)
+        return get_summary_safe(_data.GetChildMemberWithName("name"), internal_dict, _options)
     else:
-        return get_summary_safe(_data.GetChildMemberWithName("cname"), internal_dict)
+        return get_summary_safe(_data.GetChildMemberWithName("cname"), internal_dict, _options)
 
 
-def Ref_SummaryProvider(valobj: SBValue, internal_dict):
-    return GenericShortSummary(valobj, internal_dict)
+def Ref_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
+    return GenericShortSummary(valobj, internal_dict, _options)
 
-def NodePath_SummaryProvider(valobj: SBValue, internal_dict):
+def NodePath_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     rstr = ""
     data: SBValue = valobj.GetChildMemberWithName("data")
     if data and data.IsValid() and data.GetValueAsUnsigned() == 0:
@@ -537,21 +552,21 @@ def NodePath_SummaryProvider(valobj: SBValue, internal_dict):
         rstr = "/"
     for i in range(path_size):
         child = path.get_child_at_index(i)
-        rstr += strip_quotes(get_summary_safe(child, internal_dict))
+        rstr += strip_quotes(get_summary_safe(child, internal_dict, _options))
         if i < path.num_children() - 1:
             rstr += "/"
     if subpath_size > 0:
         rstr += ":"
     for i in range(subpath_size):
         child = subpath.get_child_at_index(i)
-        rstr += strip_quotes(get_summary_safe(child, internal_dict))
+        rstr += strip_quotes(get_summary_safe(child, internal_dict, _options))
         if i < subpath_size - 1:
             rstr += ":"
     return rstr
 
 
 @print_trace_dec
-def Quaternion_SummaryProvider(valobj: SBValue, internal_dict):
+def Quaternion_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     return "{{{0}, {1}, {2}, {3}}}".format(
         GetFloat(valobj.GetChildMemberWithName("x")),
         GetFloat(valobj.GetChildMemberWithName("y")),
@@ -561,7 +576,7 @@ def Quaternion_SummaryProvider(valobj: SBValue, internal_dict):
 
 
 @print_trace_dec
-def ObjectID_SummaryProvider(valobj: SBValue, internal_dict):
+def ObjectID_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     fmt = "<ObjectID={0}>"
     id: SBValue = valobj.GetChildMemberWithName("id")
     if not id.IsValid():
@@ -573,11 +588,11 @@ def ObjectID_SummaryProvider(valobj: SBValue, internal_dict):
 
 
 @print_trace_dec
-def Signal_SummaryProvider(valobj: SBValue, internal_dict):
+def Signal_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     # Signal has a StringName name and an ObjectID object
     name: SBValue = valobj.GetChildMemberWithName("name")
     object: SBValue = valobj.GetChildMemberWithName("object")
-    name_summary, object_summary = get_summary_safe(name, internal_dict), get_summary_safe(object, internal_dict)
+    name_summary, object_summary = get_summary_safe(name, internal_dict, _options), get_summary_safe(object, internal_dict, _options)
     if not name_summary or not object_summary:
         return INVALID_SUMMARY
     if NULL_SUMMARY in name_summary and NULL_SUMMARY in object_summary:
@@ -586,10 +601,10 @@ def Signal_SummaryProvider(valobj: SBValue, internal_dict):
 
 
 @print_trace_dec
-def Callable_SummaryProvider(valobj: SBValue, internal_dict):
+def Callable_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     # If `method` is blank, and `custom` is not a null pointer, then it's a CallableCustom
     method: SBValue = valobj.GetChildMemberWithName("method")  # StringName
-    method_name: str = get_summary_safe(method, internal_dict)
+    method_name: str = get_summary_safe(method, internal_dict, _options)
     if method_name == NULL_SUMMARY or method_name == EMPTY_SUMMARY:
         custom: SBValue = valobj.GetChildMemberWithName("custom")
         if custom.GetValueAsUnsigned() != 0:
@@ -633,13 +648,13 @@ def get_floats_for_vectors(valobj: SBValue, member_names: list[str]) -> list[flo
     return floats
 
 @print_trace_dec
-def Vector2_SummaryProvider(valobj: SBValue, internal_dict):
+def Vector2_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     floats = get_floats_for_vectors(valobj, ["x", "y"])
     return "({0}, {1})".format(floats[0], floats[1])
 
 
 @print_trace_dec
-def Vector3_SummaryProvider(valobj: SBValue, internal_dict):
+def Vector3_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     floats = get_floats_for_vectors(valobj, ["x", "y", "z"])
     return "({0}, {1}, {2})".format(
         floats[0],
@@ -648,7 +663,7 @@ def Vector3_SummaryProvider(valobj: SBValue, internal_dict):
     )
 
 @print_trace_dec
-def Vector4_SummaryProvider(valobj: SBValue, internal_dict):
+def Vector4_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     floats = get_floats_for_vectors(valobj, ["x", "y", "z", "w"])
     return "({0}, {1}, {2}, {3})".format(
         floats[0],
@@ -659,7 +674,7 @@ def Vector4_SummaryProvider(valobj: SBValue, internal_dict):
 
 
 @print_trace_dec
-def Vector2i_SummaryProvider(valobj: SBValue, internal_dict):
+def Vector2i_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     return "({0}, {1})".format(
         valobj.GetChildMemberWithName("x").GetValueAsSigned(),
         valobj.GetChildMemberWithName("y").GetValueAsSigned(),
@@ -667,7 +682,7 @@ def Vector2i_SummaryProvider(valobj: SBValue, internal_dict):
 
 
 @print_trace_dec
-def Vector3i_SummaryProvider(valobj: SBValue, internal_dict):
+def Vector3i_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     return "({0}, {1}, {2})".format(
         valobj.GetChildMemberWithName("x").GetValueAsSigned(),
         valobj.GetChildMemberWithName("y").GetValueAsSigned(),
@@ -676,7 +691,7 @@ def Vector3i_SummaryProvider(valobj: SBValue, internal_dict):
 
 
 @print_trace_dec
-def Vector4i_SummaryProvider(valobj: SBValue, internal_dict):
+def Vector4i_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     return "({0}, {1}, {2}, {3})".format(
         valobj.GetChildMemberWithName("x").GetValueAsSigned(),
         valobj.GetChildMemberWithName("y").GetValueAsSigned(),
@@ -686,7 +701,7 @@ def Vector4i_SummaryProvider(valobj: SBValue, internal_dict):
 
 
 @print_trace_dec
-def Rect2_SummaryProvider(valobj: SBValue, internal_dict):
+def Rect2_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     return "{{position: ({0}, {1}), size: ({2}, {3})}}".format(
         GetFloat(valobj.GetChildMemberWithName("position").GetChildMemberWithName("x")),
         GetFloat(valobj.GetChildMemberWithName("position").GetChildMemberWithName("y")),
@@ -696,7 +711,7 @@ def Rect2_SummaryProvider(valobj: SBValue, internal_dict):
 
 
 @print_trace_dec
-def Rect2i_SummaryProvider(valobj: SBValue, internal_dict):
+def Rect2i_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     return "{{position: ({0}, {1}), size: ({2}, {3})}}".format(
         valobj.GetChildMemberWithName("position").GetChildMemberWithName("x").GetValueAsSigned(),
         valobj.GetChildMemberWithName("position").GetChildMemberWithName("y").GetValueAsSigned(),
@@ -711,7 +726,7 @@ def ConstructNamedColorTable(global_named_colors_table: SBValue) -> dict[str, st
         for i in range(global_named_colors_table.GetNumChildren()):
             named_color = ValCheck(global_named_colors_table.GetChildAtIndex(i))
             name_val = ValCheck(named_color.GetChildMemberWithName("name"))
-            name_val_summary = get_summary_safe(name_val)
+            name_val_summary = get_summary_safe(name_val, {}, GodotSummaryOptions())
             if not name_val_summary:  # nullptr at the end of the array
                 break
             name = strip_quotes(name_val_summary)
@@ -769,7 +784,7 @@ def GetColorVals(valobj: SBValue):
 
 
 @print_trace_dec
-def Color_SummaryProvider(valobj: SBValue, internal_dict):
+def Color_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     r, g, b, a = GetColorVals(valobj)
     if not Opts.NAMED_COLOR_ANNOTATION:
         hex_str = GetHexColor(r, g, b, a)
@@ -779,67 +794,67 @@ def Color_SummaryProvider(valobj: SBValue, internal_dict):
 
 
 @print_trace_dec
-def Plane_SummaryProvider(valobj: SBValue, internal_dict):
+def Plane_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     return "{{normal: {0}, d: {1}}}".format(
-        get_summary_safe(valobj.GetChildMemberWithName("normal"), internal_dict),
+        get_summary_safe(valobj.GetChildMemberWithName("normal"), internal_dict, _options),
         valobj.GetChildMemberWithName("d").GetValueAsSigned(),
     )
 
 
 @print_trace_dec
-def AABB_SummaryProvider(valobj: SBValue, internal_dict):
+def AABB_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     return "{{position: {{{0}}}, size: {{{1}}}}}".format(
-        get_summary_safe(valobj.GetChildMemberWithName("position"), internal_dict),
-        get_summary_safe(valobj.GetChildMemberWithName("size"), internal_dict),
+        get_summary_safe(valobj.GetChildMemberWithName("position"), internal_dict, _options),
+        get_summary_safe(valobj.GetChildMemberWithName("size"), internal_dict, _options),
     )
 
 
 @print_trace_dec
-def Transform2D_SummaryProvider(valobj: SBValue, internal_dict):
+def Transform2D_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     # transform2d has a Vector2 `origin`, Vector2 `x`, and Vector2 `y`
     x_row = valobj.GetChildMemberWithName("columns").GetChildAtIndex(0)
     y_row = valobj.GetChildMemberWithName("columns").GetChildAtIndex(1)
     o_row = valobj.GetChildMemberWithName("columns").GetChildAtIndex(2)
-    return "{{x: {0}, y: {1}, o: {2}}}".format(get_summary_safe(x_row, internal_dict), get_summary_safe(y_row, internal_dict), get_summary_safe(o_row, internal_dict))
+    return "{{x: {0}, y: {1}, o: {2}}}".format(get_summary_safe(x_row, internal_dict, _options), get_summary_safe(y_row, internal_dict, _options), get_summary_safe(o_row, internal_dict, _options))
 
 
 @print_trace_dec
-def Transform3D_SummaryProvider(valobj: SBValue, internal_dict):
+def Transform3D_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     # transform3d has a Basis `basis` and Vector3 `origin`
     return "{{basis: {0}, origin: {1}}}".format(
-        get_summary_safe(valobj.GetChildMemberWithName("basis"), internal_dict),
-        get_summary_safe(valobj.GetChildMemberWithName("origin"), internal_dict),
+        get_summary_safe(valobj.GetChildMemberWithName("basis"), internal_dict, _options),
+        get_summary_safe(valobj.GetChildMemberWithName("origin"), internal_dict, _options),
     )
 
 
 @print_trace_dec
-def Projection_SummaryProvider(valobj: SBValue, internal_dict):
+def Projection_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     # projection has 	`Vector4 columns[4]`
     return "{{columns: {{{0}, {1}, {2}, {3}}}}}".format(
-        get_summary_safe(valobj.GetChildMemberWithName("columns").GetChildAtIndex(0), internal_dict),
-        get_summary_safe(valobj.GetChildMemberWithName("columns").GetChildAtIndex(1), internal_dict),
-        get_summary_safe(valobj.GetChildMemberWithName("columns").GetChildAtIndex(2), internal_dict),
-        get_summary_safe(valobj.GetChildMemberWithName("columns").GetChildAtIndex(3), internal_dict),
+        get_summary_safe(valobj.GetChildMemberWithName("columns").GetChildAtIndex(0), internal_dict, _options),
+        get_summary_safe(valobj.GetChildMemberWithName("columns").GetChildAtIndex(1), internal_dict, _options),
+        get_summary_safe(valobj.GetChildMemberWithName("columns").GetChildAtIndex(2), internal_dict, _options),
+        get_summary_safe(valobj.GetChildMemberWithName("columns").GetChildAtIndex(3), internal_dict, _options),
     )
 
 
 @print_trace_dec
-def Basis_SummaryProvider(valobj: SBValue, internal_dict):
+def Basis_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     # basis has a Vector3[3] `rows` (NOT `elements`)
     # need to translate into (xx, xy, xy), (yx, yy, yz), (zx, zy, zz)
     x_row = valobj.GetChildMemberWithName("rows").GetChildAtIndex(0)
     y_row = valobj.GetChildMemberWithName("rows").GetChildAtIndex(1)
     z_row = valobj.GetChildMemberWithName("rows").GetChildAtIndex(2)
-    return "{{{0}, {1}, {2}}}".format(get_summary_safe(x_row, internal_dict), get_summary_safe(y_row, internal_dict), get_summary_safe(z_row, internal_dict))
+    return "{{{0}, {1}, {2}}}".format(get_summary_safe(x_row, internal_dict, _options), get_summary_safe(y_row, internal_dict, _options), get_summary_safe(z_row, internal_dict, _options))
 
 
 @print_trace_dec
-def RID_SummaryProvider(valobj: SBValue, internal_dict):
+def RID_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     return "<RID=" + str(valobj.GetChildMemberWithName("_id").GetValueAsUnsigned()) + ">"
 
 
 @print_trace_dec
-def String_SummaryProvider(valobj: SBValue, internal_dict):
+def String_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     _cowdata: SBValue = valobj.GetChildMemberWithName("_cowdata")
     size = get_cowdata_size_or_none(_cowdata)
     if size is None or size < 0:
@@ -874,7 +889,7 @@ def String_SummaryProvider(valobj: SBValue, internal_dict):
 
 
 @print_trace_dec
-def CharString_SummaryProvider(valobj: SBValue, internal_dict):
+def CharString_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     _cowdata: SBValue = valobj.GetChildMemberWithName("_cowdata")
     size = get_cowdata_size_or_none(_cowdata)
     type = valobj.GetType()
@@ -898,7 +913,7 @@ def CharString_SummaryProvider(valobj: SBValue, internal_dict):
     _ptr: SBValue = _cowdata.GetChildMemberWithName("_ptr")
     _ptr.format = format
     if Opts.SANITIZE_STRING_SUMMARY:
-        ret = get_summary_safe(_ptr, internal_dict)
+        ret = get_summary_safe(_ptr, internal_dict, _options)
         if ret.startswith('U"'):
             ret = '"' + ret.removeprefix('U"')
         return ret
@@ -924,6 +939,7 @@ def get_unqual_type_name(type: SBType) -> str:
 def GenericShortSummary(
     valobj: SBValue,
     internal_dict,
+    _options: GodotSummaryOptions,
     summary_length=0,
     skip_base_class=False,
     no_children=False,
@@ -934,8 +950,8 @@ def GenericShortSummary(
     depth += 1
     START_SUMMARY_LENGTH = summary_length
     is_child = summary_length != 0
-    MAX_LEN = Opts.SUMMARY_STRING_MAX_LENGTH - (20 if is_child else 0)
-    if summary_length > Opts.SUMMARY_STRING_MAX_LENGTH or depth > MAX_DEPTH:
+    MAX_LEN = _options.GetMaxStringLength() - (20 if is_child else 0)
+    if summary_length > _options.GetMaxStringLength() or depth > MAX_DEPTH:
         # bail out
         return "{...}"
     type: SBType = valobj.GetType()
@@ -948,7 +964,7 @@ def GenericShortSummary(
     if unqual_type_name == "Variant":
         variant_type = get_variant_type(valobj)
         if is_variant_type_non_recursive(variant_type):
-            return Variant_SyntheticProvider(valobj.GetNonSyntheticValue(), internal_dict).get_summary()
+            return Variant_SyntheticProvider(valobj.GetNonSyntheticValue(), internal_dict).get_summary(_options)
     if unqual_type_name == "Object" or unqual_type_name == "RefCounted":  # these lead to circular references
         return "{...}"
     if unqual_type_name.startswith("Ref<"):
@@ -964,6 +980,7 @@ def GenericShortSummary(
         summary = GenericShortSummary(
             deref,
             internal_dict,
+            _options,
             START_SUMMARY_LENGTH + len(prefix),
             True,
             no_children,
@@ -980,6 +997,7 @@ def GenericShortSummary(
             return GenericShortSummary(
                 variant_value,
                 internal_dict,
+                _options,
                 summary_length,
                 skip_base_class,
                 no_children,
@@ -997,13 +1015,13 @@ def GenericShortSummary(
                 is_subclass_of_proxy = "_Proxy_SyntheticProvider" in bases_str
                 if is_subclass_of_list_of_children or is_subclass_of_proxy:
                     synh_prov: _ListOfChildren_SyntheticProvider | _Proxy_SyntheticProvider = get_synth_provider_for_object(synth_provider_type, valobj, internal_dict, is_summary=True)
-                    return synh_prov.get_summary(max_children=3, max_str_len=MAX_LEN - START_SUMMARY_LENGTH)
+                    return synh_prov.get_summary(GodotSummaryOptions(None, max_children=3, max_string_length=MAX_LEN - START_SUMMARY_LENGTH))
                 # print the type name of the synth provider
                 # print the parent class of the synth provider
             return unqual_type_name + "{...}"
     else:
         try:
-            summ = get_summary_or_none_safe(valobj, internal_dict)
+            summ = get_summary_or_none_safe(valobj, internal_dict, _options)
         except Exception as e:
             summ = " GetSummary() EXCEPTION: " + str(e)
             summ += " " + str(valobj.GetDisplayTypeName())
@@ -1029,6 +1047,7 @@ def GenericShortSummary(
                 summ_str += prefix + GenericShortSummary(
                     child,
                     internal_dict,
+                    _options,
                     len(summ_str) + START_SUMMARY_LENGTH,
                     False,
                     no_children,
@@ -1051,38 +1070,38 @@ def GenericShortSummary(
     return summ_str
 
 
-def key_value_summary(valobj: SBValue, internal_dict, key_val_style):
+def key_value_summary(valobj: SBValue, internal_dict, key_val_style, _options: GodotSummaryOptions):
     key = valobj.GetChildMemberWithName("key")
     value = valobj.GetChildMemberWithName("value")
     if key_val_style:
-        return GenericShortSummary(value, internal_dict)
+        return GenericShortSummary(value, internal_dict, _options)
     return "{0}: {1}".format(
-        GenericShortSummary(key, internal_dict),
-        GenericShortSummary(value, internal_dict),
+        GenericShortSummary(key, internal_dict, _options),
+        GenericShortSummary(value, internal_dict, _options),
     )
 
 
-def map_element_summary(valobj: SBValue, internal_dict, data_name):
+def map_element_summary(valobj: SBValue, internal_dict, data_name, _options: GodotSummaryOptions):
     data: SBValue = valobj.GetChildMemberWithName(data_name)
     if not data or not data.IsValid():
         return None
     key = data.GetChildMemberWithName("key")
     style = should_use_key_val_style(key.GetType() if not_null_check(key) else None)
-    return key_value_summary(data, internal_dict, style)
+    return key_value_summary(data, internal_dict, style, _options)
 
 
-def KeyValue_SummaryProvider(valobj: SBValue, internal_dict):
+def KeyValue_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     key = valobj.GetChildMemberWithName("key")
     style = should_use_key_val_style(key.GetType() if not_null_check(key) else None)
-    return key_value_summary(valobj, internal_dict, style)
+    return key_value_summary(valobj, internal_dict, style, _options)
 
 
-def HashMapElement_SummaryProvider(valobj: SBValue, internal_dict):
-    return map_element_summary(valobj, internal_dict, "data")
+def HashMapElement_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
+    return map_element_summary(valobj, internal_dict, "data", _options)
 
 
-def RBMapElement_SummaryProvider(valobj: SBValue, internal_dict):
-    return map_element_summary(valobj, internal_dict, "_data")
+def RBMapElement_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
+    return map_element_summary(valobj, internal_dict, "_data", _options)
 
 HASHMAP_TRACE_ENABLED = False
 
@@ -1188,19 +1207,19 @@ class HashMapElement_SyntheticProvider(GodotSynthProvider):
         return True
 
     @hashmap_trace
-    def get_summary(self, max_children=Opts.MAX_AMOUNT_OF_CHILDREN_IN_SUMMARY, max_str_len=Opts.SUMMARY_STRING_MAX_LENGTH) -> str:
+    def get_summary(self, _options: GodotSummaryOptions) -> str:
         if not self.check_valid(self.valobj):
             return INVALID_SUMMARY
         value = self.get_value()
         if value is None:
             return INVALID_SUMMARY
-        value_summary = GenericShortSummary(value, self.internal_dict, summary_length=max_str_len, no_children=True)
+        value_summary = GenericShortSummary(value, self.internal_dict, _options, summary_length=_options.GetMaxStringLength(), no_children=True)
         if hasattr(self, "is_summary") and self.key_val_element_style:  # only show the value for the summary
             return value_summary
         key = self.get_key()
         if key is None:
             return INVALID_SUMMARY
-        key_summary = GenericShortSummary(key, self.internal_dict, summary_length=max_str_len - len(value_summary), no_children=True)
+        key_summary = GenericShortSummary(key, self.internal_dict, _options, summary_length=_options.GetMaxStringLength() - len(value_summary), no_children=True)
         return "[{0}]: {1}".format(key_summary, value_summary)
 
 
@@ -1250,14 +1269,14 @@ class _ListOfChildren_SyntheticProvider(GodotSynthProvider):
         """
         raise Exception("Not implemented")
 
-    def _get_child_summary(self, real_index: int) -> str:
+    def _get_child_summary(self, real_index: int, _options: GodotSummaryOptions) -> str:
         """
         Override this method if you want to provide a custom summary for the child at the given index
         """
         element = self._create_child_at_element_index(real_index)
         if not not_null_check(element) or not element:
             return INVALID_SUMMARY
-        return GenericShortSummary(element, self.internal_dict, 0, False, True)
+        return GenericShortSummary(element, self.internal_dict, _options, 0, False, True)
 
     # def get_size_synthetic_child(self):
     #     return self.valobj.CreateValueFromData("[size]", SBData.CreateDataFromInt(self.num_elements), self.valobj.target.GetBasicType(eBasicTypeUnsignedInt))
@@ -1271,15 +1290,15 @@ class _ListOfChildren_SyntheticProvider(GodotSynthProvider):
         self._cached_size = value
 
     @print_trace_dec
-    def get_children_summary(self, max_children=Opts.MAX_AMOUNT_OF_CHILDREN_IN_SUMMARY, max_str_len=Opts.SUMMARY_STRING_MAX_LENGTH) -> str:
+    def get_children_summary(self, _options: GodotSummaryOptions) -> str:
         if self.num_elements == 0:
             return ""
-        max_children = min(Opts.MAX_AMOUNT_OF_CHILDREN_IN_SUMMARY, self.num_elements)
+        max_children = min(_options.GetMaxChildren(), self.num_elements)
         i: int = 0
         summ_str = ""
         for i in range(max_children):
-            summ_str += self._get_child_summary(i)
-            if len(summ_str) > max_str_len:
+            summ_str += self._get_child_summary(i, _options)
+            if len(summ_str) > _options.GetMaxStringLength():
                 break
             if max_children != 1 and i < max_children - 1:
                 summ_str += ", "
@@ -1307,14 +1326,14 @@ class _ListOfChildren_SyntheticProvider(GodotSynthProvider):
             return None
 
     @print_trace_dec
-    def get_summary(self, max_children=Opts.MAX_AMOUNT_OF_CHILDREN_IN_SUMMARY, max_str_len=Opts.SUMMARY_STRING_MAX_LENGTH) -> str:
+    def get_summary(self, _options: GodotSummaryOptions) -> str:
         if not self.check_valid(self.valobj):
             return INVALID_SUMMARY
         return LIST_FORMAT.format(
             type_name=self.typename,
             type_no_template=self.typename.split("<")[0],
             size=self.num_elements,
-            children=self.get_children_summary(max_children, max_str_len),
+            children=self.get_children_summary(_options),
         )
 
 
@@ -1525,29 +1544,29 @@ class HashSet_SyntheticProvider(_ArrayLike_SyntheticProvider):
         return obj.GetChildMemberWithName(self.hash_set_size_name).GetValueAsUnsigned(0)
 
 
-def _VMap_Pair_get_keypair_summaries(valobj: SBValue, internal_dict, is_VMap_Summary=False) -> tuple[str, str]:
+def _VMap_Pair_get_keypair_summaries(valobj: SBValue, internal_dict, _options: GodotSummaryOptions, is_VMap_Summary=False) -> tuple[str, str]:
     key: SBValue = valobj.GetChildMemberWithName("key")
     value: SBValue = valobj.GetChildMemberWithName("value")
-    key_summary = GenericShortSummary(key, internal_dict, 0, False, is_VMap_Summary)
-    value_summary = GenericShortSummary(value, internal_dict, 0, False, is_VMap_Summary)
+    key_summary = GenericShortSummary(key, internal_dict, _options, 0, False, is_VMap_Summary)
+    value_summary = GenericShortSummary(value, internal_dict, _options, 0, False, is_VMap_Summary)
     return key_summary, value_summary
 
 
-def VMap_Pair_SummaryProvider(valobj: SBValue, internal_dict):
+def VMap_Pair_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     fmt_str = "[{0}]: {1}"
     key: SBValue = valobj.GetChildMemberWithName("key")
     key_template_type = key.GetType() if key else None
     if should_use_key_val_style(key_template_type):
         value: SBValue = valobj.GetChildMemberWithName("value")
-        return GenericShortSummary(value, internal_dict)
-    return fmt_str.format(*_VMap_Pair_get_keypair_summaries(valobj, internal_dict))
+        return GenericShortSummary(value, internal_dict, _options)
+    return fmt_str.format(*_VMap_Pair_get_keypair_summaries(valobj, internal_dict, _options))
 
 # Pair<K, V>, not part of a map
-def Pair_SummaryProvider(valobj: SBValue, internal_dict):
+def Pair_SummaryProvider(valobj: SBValue, internal_dict, _options: GodotSummaryOptions):
     fmt_str = "({0}, {1})"
     key: SBValue = valobj.GetChildMemberWithName("first")
     value: SBValue = valobj.GetChildMemberWithName("second")
-    return fmt_str.format(GenericShortSummary(key, internal_dict), GenericShortSummary(value, internal_dict))
+    return fmt_str.format(GenericShortSummary(key, internal_dict, _options), GenericShortSummary(value, internal_dict, _options))
 
 
 class VMap_SyntheticProvider(_ArrayLike_SyntheticProvider):
@@ -1592,17 +1611,17 @@ class VMap_SyntheticProvider(_ArrayLike_SyntheticProvider):
                 continue
             # get the key summary
             key: SBValue = child.GetChildMemberWithName("key")
-            key_summary = GenericShortSummary(key, self.internal_dict)
+            key_summary = GenericShortSummary(key, self.internal_dict, GodotSummaryOptions(None, max_children=3, max_string_length=self.cache_fetch_max))
             self.cached_key_summaries.append(key_summary)
             self.cached_key_to_idx_map[key_summary] = i
 
-    def _get_child_summary(self, real_index: int) -> str:
+    def _get_child_summary(self, real_index: int, _options: GodotSummaryOptions) -> str:
         if real_index < 0 or real_index >= self.num_elements or self.valobj.IsValid() == False:
             return INVALID_SUMMARY
         element = self._create_child_at_element_index(real_index)
         if not element:
             return INVALID_SUMMARY
-        key, value = _VMap_Pair_get_keypair_summaries(element, self.internal_dict, True)
+        key, value = _VMap_Pair_get_keypair_summaries(element, self.internal_dict, _options, True)
         if not element or not element.IsValid():
             return INVALID_SUMMARY
         return "[{0}]: {1}".format(key, value)
@@ -1615,7 +1634,7 @@ class VMap_SyntheticProvider(_ArrayLike_SyntheticProvider):
                 return None
             child = self.ptr_cast.GetChildAtIndex(index, eDynamicCanRunTarget, True)
             key: SBValue = child.GetChildMemberWithName("key")
-            key_summary = GenericShortSummary(key, self.internal_dict)
+            key_summary = GenericShortSummary(key, self.internal_dict, GodotSummaryOptions())
             return key_summary
         if index < len(self.cached_key_summaries):
             return self.cached_key_summaries[index]
@@ -1643,7 +1662,7 @@ class VMap_SyntheticProvider(_ArrayLike_SyntheticProvider):
                 if not self.ptr_cast:
                     continue
                 child = self.ptr_cast.GetChildAtIndex(i, eDynamicCanRunTarget, True)
-                key_summary = GenericShortSummary(child.GetChildMemberWithName("key"), self.internal_dict)
+                key_summary = GenericShortSummary(child.GetChildMemberWithName("key"), self.internal_dict, GodotSummaryOptions())
                 if key_summary == key:
                     return i
             return None
@@ -1930,7 +1949,7 @@ class HashMap_SyntheticProvider(_LinkedListLike_SyntheticProvider):
 
     @hashmap_trace
     @wrap_in_try_except_ret_error_summary
-    def _get_child_summary(self, real_index: int) -> str:
+    def _get_child_summary(self, real_index: int, _options: GodotSummaryOptions) -> str:
         if real_index < 0 or real_index >= self.num_elements or not self.valobj or self.valobj.IsValid() == False:
             return INVALID_SUMMARY
         keyval_synth_val = self._create_child_at_element_index(real_index)
@@ -1940,8 +1959,8 @@ class HashMap_SyntheticProvider(_LinkedListLike_SyntheticProvider):
         # both RBMap and HashMap use KeyValue<K, V> for the data member of their elements
         key = keyval_data.GetChildMemberWithName("key")
         value = keyval_data.GetChildMemberWithName("value")
-        key_summary = GenericShortSummary(key, self.internal_dict)
-        value_summary = GenericShortSummary(value, self.internal_dict)
+        key_summary = GenericShortSummary(key, self.internal_dict, _options)
+        value_summary = GenericShortSummary(value, self.internal_dict, _options)
         return "[{0}]: {1}".format(key_summary, value_summary)
     
     def get_offset_of_element_data(self, element: SBValue) -> int:
@@ -1975,7 +1994,7 @@ class HashMap_SyntheticProvider(_LinkedListLike_SyntheticProvider):
             element = self.cached_elements[start]
         if self.key_val_element_style:
             key = self.get_list_element_key(element)
-            keySummary = GenericShortSummary(key, self.internal_dict, 0, False, False)
+            keySummary = GenericShortSummary(key, self.internal_dict, GodotSummaryOptions(), 0, False, False)
             self.cached_key_to_idx_map[keySummary] = start
             self.cached_idx_to_key_map[start] = keySummary
         for _ in range(start + 1, size):
@@ -1985,7 +2004,7 @@ class HashMap_SyntheticProvider(_LinkedListLike_SyntheticProvider):
             self.cached_elements.append(element)
             if self.key_val_element_style:
                 key = self.get_list_element_key(element)
-                keySummary = GenericShortSummary(key, self.internal_dict, 0, False, False)
+                keySummary = GenericShortSummary(key, self.internal_dict, GodotSummaryOptions(), 0, False, False)
                 self.cached_key_to_idx_map[keySummary] = len(self.cached_elements) - 1
                 self.cached_idx_to_key_map[len(self.cached_elements) - 1] = keySummary
 
@@ -2000,7 +2019,7 @@ class HashMap_SyntheticProvider(_LinkedListLike_SyntheticProvider):
                 keyname = self.cached_idx_to_key_map[index]
             else:
                 key = self.get_list_element_key(element)
-                keyname = GenericShortSummary(key, self.internal_dict, 0, False, False)
+                keyname = GenericShortSummary(key, self.internal_dict, GodotSummaryOptions(), 0, False, False)
         else:
             keyname = str(index)
         if keyname not in self.cached_key_to_idx_map:
@@ -2077,7 +2096,7 @@ class _Proxy_SyntheticProvider(GodotSynthProvider):
         ret = self.synth_proxy.check_valid(self.synth_proxy.valobj)
         return ret
 
-    def get_summary(self, max_children=Opts.MAX_AMOUNT_OF_CHILDREN_IN_SUMMARY, max_str_len=Opts.SUMMARY_STRING_MAX_LENGTH):
+    def get_summary(self, _options: GodotSummaryOptions):
         if self.synth_proxy is None:
             print_trace("synth_proxy is None")
             self.update()
@@ -2086,7 +2105,7 @@ class _Proxy_SyntheticProvider(GodotSynthProvider):
         if not self.check_valid(self.valobj):
             return INVALID_SUMMARY
         size = self.synth_proxy.num_elements
-        children_summary = self.synth_proxy.get_children_summary(max_children, max_str_len)
+        children_summary = self.synth_proxy.get_children_summary(_options)
         type_name = get_unqual_type_name(self.valobj.GetType())
         return LIST_FORMAT.format(
             type_name=type_name,
@@ -2172,7 +2191,7 @@ class RingBuffer_SyntheticProvider(_Proxy_SyntheticProvider):
             self.read_pos = self.valobj.GetChildMemberWithName("read_pos").GetValueAsSigned() & self.size_mask
             self.write_pos = self.valobj.GetChildMemberWithName("write_pos").GetValueAsSigned() & self.size_mask
 
-    def get_summary(self, max_children=Opts.MAX_AMOUNT_OF_CHILDREN_IN_SUMMARY, max_str_len=Opts.SUMMARY_STRING_MAX_LENGTH):
+    def get_summary(self, _options: GodotSummaryOptions):
         if not self.check_valid(self.valobj):
             return INVALID_SUMMARY
         children_summary = ""
@@ -2181,7 +2200,7 @@ class RingBuffer_SyntheticProvider(_Proxy_SyntheticProvider):
             size = self.synth_proxy.num_elements
             read_pos_summary = "<read_pos:{0}>".format(self.read_pos)
             write_pos_summary = "<write_pos:{0}>".format(self.write_pos)
-            proxy_children_sum = self.synth_proxy.get_children_summary(max_children, max_str_len)
+            proxy_children_sum = self.synth_proxy.get_children_summary(_options)
             children_summary = f"{read_pos_summary} {write_pos_summary} {proxy_children_sum}"
         return LIST_FORMAT.format(
             type_name=get_unqual_type_name(self.valobj.GetType()),

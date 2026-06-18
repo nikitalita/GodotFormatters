@@ -47,7 +47,7 @@ godot_formatters.godot_gdext_providers.get_godot_synthetic_provider_for_type = g
 godot_formatters.godot_gdext_providers.get_godot_summary_provider_for_type = get_summary_provider_for_type
 
 
-from lldb import SBDebugger, SBTypeCategory  # pyright: ignore[reportMissingModuleSource]
+from lldb import SBDebugger, SBTypeCategory, SBTypeSummaryOptions  # pyright: ignore[reportMissingModuleSource]
 from lldb import (SBCommandReturnObject, SBExecutionContext, SBTypeCategory, eFormatBytes, eFormatCString, eFormatUnicode32, eNoDynamicValues, eDynamicDontRunTarget, eDynamicCanRunTarget, eBasicTypeInvalid, eBasicTypeVoid, eBasicTypeChar,   # pyright: ignore[reportMissingModuleSource]
                   eBasicTypeSignedChar, eBasicTypeUnsignedChar, eBasicTypeWChar, eBasicTypeSignedWChar, eBasicTypeUnsignedWChar, eBasicTypeChar16, eBasicTypeChar32, 
                   eBasicTypeChar8, eBasicTypeShort, eBasicTypeUnsignedShort, eBasicTypeInt, eBasicTypeUnsignedInt, eBasicTypeLong, eBasicTypeUnsignedLong, eBasicTypeLongLong, 
@@ -115,8 +115,9 @@ def attach_synthetic_to_type(module, category: SBTypeCategory, type_name, synth_
     if not category.AddTypeSynthetic(SBTypeNameSpecifier(type_name, is_regex), synth):
         print(f"Failed to add synthetic for {type_name}")
 
-    def summary_fn(valobj, dict):
-        return get_synth_summary(synth_class, valobj, dict)
+    def summary_fn(valobj, dict, _options = None):
+        return get_synth_summary(synth_class, valobj, dict, _options)
+
 
     # LLDB accesses summary fn's by name, so we need to create a unique one.
     real_fn_name = "_get_synth_summary_" + synth_class.__name__
@@ -130,8 +131,9 @@ def attach_summary_to_type(module, category: SBTypeCategory, type_name, real_sum
         real_fn_name = str(real_summary_fn.__qualname__)
     # LLDB recently added an optional "options" parameter to summary functions, but we don't use it yet
     def __spfunc(valobj, dict, _options = None):
+        _options = GodotSummaryOptions(_options)
         try:
-            return real_summary_fn(valobj, dict)
+            return real_summary_fn(valobj, dict, _options)
         except Exception as e:
             err_msg = "ERROR in " + real_fn_name + ": " + str(e)
             print_verbose(err_msg)

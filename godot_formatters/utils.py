@@ -17,12 +17,12 @@ from typing import final, Optional
 
 
 # fmt: off
-from lldb import (SBCommandReturnObject, SBExecutionContext, SBTypeCategory, eFormatBytes, eFormatCString, eFormatUnicode32, eNoDynamicValues, eDynamicDontRunTarget, eDynamicCanRunTarget, eBasicTypeInvalid, eBasicTypeVoid, eBasicTypeChar, # pyright: ignore[reportMissingModuleSource]
+from lldb import (SBCommandReturnObject, SBExecutionContext, SBTypeCategory, SBTypeSummaryOptions, eFormatBytes, eFormatCString, eFormatUnicode32, eLanguageTypeC_plus_plus, eNoDynamicValues, eDynamicDontRunTarget, eDynamicCanRunTarget, eBasicTypeInvalid, eBasicTypeVoid, eBasicTypeChar, # pyright: ignore[reportMissingModuleSource]
                   eBasicTypeSignedChar, eBasicTypeUnsignedChar, eBasicTypeWChar, eBasicTypeSignedWChar, eBasicTypeUnsignedWChar, eBasicTypeChar16, eBasicTypeChar32, 
                   eBasicTypeChar8, eBasicTypeShort, eBasicTypeUnsignedShort, eBasicTypeInt, eBasicTypeUnsignedInt, eBasicTypeLong, eBasicTypeUnsignedLong, eBasicTypeLongLong, 
                   eBasicTypeUnsignedLongLong, eBasicTypeInt128, eBasicTypeUnsignedInt128, eBasicTypeBool, eBasicTypeHalf, eBasicTypeFloat, eBasicTypeDouble, eBasicTypeLongDouble, 
                   eBasicTypeFloatComplex, eBasicTypeDoubleComplex, eBasicTypeLongDoubleComplex, eBasicTypeObjCID, eBasicTypeObjCClass, eBasicTypeObjCSel, eBasicTypeNullPtr, eReturnStatusSuccessFinishNoResult, eReturnStatusSuccessFinishResult, 
-                  eTypeClassClass, eTypeClassEnumeration, eTypeClassPointer, eTypeOptionCascade)
+                  eTypeClassClass, eTypeClassEnumeration, eTypeClassPointer, eTypeOptionCascade, eTypeSummaryCapped)
 from lldb import ( SBValue, SBAddress, SBData, SBType, SBTypeEnumMember, SBTypeEnumMemberList, SBSyntheticValueProvider, SBError, SBTarget, SBDebugger, SBTypeSummary, SBTypeSynthetic, SBTypeNameSpecifier)  # pyright: ignore[reportMissingModuleSource]
 # fmt: on
 
@@ -620,11 +620,71 @@ def not_null_check(valobj: Optional[SBValue]) -> bool:
     return True
 
 
+class GodotSummaryOptions:
+    base_options: Optional[SBTypeSummaryOptions]
+    max_string_length: int
+    max_children: int
+    
+    language: int = eLanguageTypeC_plus_plus
+    capping: int = eTypeSummaryCapped
+    def __init__(self, options: Optional[SBTypeSummaryOptions | GodotSummaryOptions] = None, max_string_length: int = -1, max_children: int = -1):
+        # check if options is of type GodotSummaryOptions
+        if isinstance(options, GodotSummaryOptions):
+            self.base_options = options.base_options
+            self.language = options.language
+            self.capping = options.capping
+            if max_string_length == -1:
+                max_string_length = options.max_string_length
+            if max_children == -1:
+                max_children = options.max_children
+        elif isinstance(options, SBTypeSummaryOptions):
+            self.base_options = options
+        else:
+            self.base_options = None
+        self.max_string_length = max_string_length if max_string_length != -1 else Opts.SUMMARY_STRING_MAX_LENGTH
+        self.max_children = max_children if max_children != -1 else Opts.MAX_AMOUNT_OF_CHILDREN_IN_SUMMARY
+    
+    def IsValid(self) -> bool:
+        return True
+    
+    def GetLanguage(self) -> int:
+        return self.language if not self.base_options else self.base_options.GetLanguage()
+    
+    def GetCapping(self) -> int:
+        return self.capping if not self.base_options else self.base_options.GetCapping()
+    
+    def SetLanguage(self, language: int):
+        if not self.base_options:
+            self.language = language
+        else:
+            self.base_options.SetLanguage(language)
+    
+    def SetCapping(self, capping: int):
+        if not self.base_options:
+            self.capping = capping
+        else:
+            self.base_options.SetCapping(capping)
+    
+    def GetMaxStringLength(self) -> int:
+        return self.max_string_length
+    
+    def GetMaxChildren(self) -> int:
+        return self.max_children
+    
+    def SetMaxStringLength(self, max_string_length: int):
+        self.max_string_length = max_string_length
+    
+    def SetMaxChildren(self, max_children: int):
+        self.max_children = max_children
+    
+
 @print_trace_dec
-def get_synth_summary(synth_class, valobj: SBValue, dict):
+def get_synth_summary(synth_class, valobj: SBValue, dict, options: Optional[SBTypeSummaryOptions | GodotSummaryOptions] = None):
+    if not isinstance(options, GodotSummaryOptions):
+        options = GodotSummaryOptions(options)
     obj = valobj
     synth = synth_class(obj, dict, 1)
-    summary = synth.get_summary()
+    summary = synth.get_summary(options)
     return summary
 
 def print_stack_trace() -> None:
