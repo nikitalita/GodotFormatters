@@ -100,4 +100,11 @@ def install_rust_visualizers(debugger: SBDebugger, internal_dict):
         return
 
 def __lldb_init_module(debugger: SBDebugger, dict):
+    # Unexplained reentrancy issue, so we need to check if we're already installing visualizers
+    if "INSTALLING_RUST_VISUALIZERS" in dict and dict["INSTALLING_RUST_VISUALIZERS"]:
+        return
+    dict["INSTALLING_RUST_VISUALIZERS"] = True
     install_rust_visualizers(debugger, dict)
+    dict["INSTALLING_RUST_VISUALIZERS"] = False
+    # remove the key
+    del dict["INSTALLING_RUST_VISUALIZERS"]
