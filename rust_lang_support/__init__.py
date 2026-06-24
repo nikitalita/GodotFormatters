@@ -2,7 +2,20 @@ from lldb import SBDebugger, SBStringList, SBType  # pyright: ignore[reportMissi
 from typing import Dict, Any
 
 def is_rust_type(sbtype: SBType, internal_dict: Dict[str, Any]) -> bool:
-    kind = internal_dict['lldb_lookup'].classify_rust_type(sbtype)
+    # check the number of arguments of the function internal_dict['lldb_lookup'].classify_rust_type
+    num_args = len(inspect.signature(internal_dict['lldb_lookup'].classify_rust_type).parameters)
+    if num_args > 2:
+        print("ERROR: Rust language visualizer installer: internal_dict['lldb_lookup'].classify_rust_type has more than 2 arguments")
+        return False
+    try:
+        if num_args == 2:
+            is_msvc = sbtype.GetModule().FindSection(".debug_info").IsValid()
+            kind = internal_dict['lldb_lookup'].classify_rust_type(sbtype, is_msvc)
+        else:
+            kind = internal_dict['lldb_lookup'].classify_rust_type(sbtype)
+    except Exception as e:
+        print(f"Error classifying Rust type: {e}")
+        return False
     return kind != 'Other'
 
 def print_message(message: str):
@@ -85,7 +98,7 @@ def install_rust_visualizers(debugger: SBDebugger, internal_dict):
         debugger.HandleCommand(command="command script import '{}'".format(lldb_lookup))
         debugger.HandleCommand(command="command script import '{}'".format(lldb_providers))
         debugger.HandleCommand(command="command script import '{}'".format(lldb_rust_types))
-        use_recognizer_fn = version_major >= 19 and hasattr(internal_dict['lldb_lookup'], 'classify_rust_type')
+        use_recognizer_fn = version_major >= 19 and hasattr(internal_dict['lldb_lookup'], 'classify_rust_type') and len(inspect.signature(internal_dict['lldb_lookup'].classify_rust_type).parameters) <= 2
         with open(lldb_commands, 'rt') as f:
             for line in f:
                 if use_recognizer_fn and line.startswith('type synthetic') and '-x ".*"' in line:
