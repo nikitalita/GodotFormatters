@@ -1,5 +1,9 @@
+import inspect
+import sys
 from lldb import SBDebugger, SBStringList, SBType  # pyright: ignore[reportMissingModuleSource]
 from typing import Dict, Any
+
+module = sys.modules[__name__]
 
 def is_rust_type(sbtype: SBType, internal_dict: Dict[str, Any]) -> bool:
     # check the number of arguments of the function internal_dict['lldb_lookup'].classify_rust_type
@@ -52,6 +56,25 @@ def get_working_dir_and_environment(debugger: SBDebugger) -> tuple[str | None, d
 
     return working_dir, environment
 
+def make_summary_provider_function(target_module_name: str, summary_provider_name: str, internal_dict: Dict[str, Any]):
+    global module
+    summary_provider = getattr(internal_dict[target_module_name], summary_provider_name)
+    def __spfunc(valobj, internal_dict, _options = None):
+        try :
+            return summary_provider(valobj, internal_dict)
+        except Exception as e:
+            print(f"Error calling summary provider {summary_provider_name}: {e}")
+            return f"<ERROR in {summary_provider_name}: {e}>"
+        except:
+            print(f"Error calling summary provider {summary_provider_name}: UNKNOWN ERROR")
+            return f"<ERROR in {summary_provider_name}: UNKNOWN ERROR>"
+    
+    # LLDB accesses summary fn's by name, so we need to create a unique one.
+    __spfunc.__name__ = "__spfunc__" + summary_provider_name.replace(".", "_")
+    setattr(module, __spfunc.__name__, __spfunc)
+    return module.__name__ + "." + __spfunc.__name__
+    
+
 def install_rust_visualizers(debugger: SBDebugger, internal_dict):
     # try to install the rust visualizers; if the category "Rust" already exists, or if we're able to import "codelldb", don't do anything
     rust_category = debugger.GetCategory("Rust")
@@ -85,6 +108,7 @@ def install_rust_visualizers(debugger: SBDebugger, internal_dict):
         sysroot = subprocess.check_output(command, startupinfo=si, encoding='utf-8', cwd=working_dir, env=environment).strip()
 
         formatters = path.join(sysroot, 'lib/rustlib/etc')
+        print("Loading Rust formatters from: ", formatters)
         lldb_lookup = path.join(formatters, 'lldb_lookup.py')
         lldb_providers = path.join(formatters, "lldb_providers.py")
         lldb_rust_types = path.join(formatters, "rust_types.py")
@@ -105,6 +129,15 @@ def install_rust_visualizers(debugger: SBDebugger, internal_dict):
                     # Replace wildcard matching with a recognizer function so Rust synthetics do not get attached
                     # to types we do not intend to handle, such as ints or floats.
                     line = 'type synthetic add -l lldb_lookup.synthetic_lookup --recognizer-function rust_lang_support.is_rust_type --category Rust'
+                #type summary add -F lldb_lookup.StdStringSummaryProvider -e -x -h "^(alloc::([a-z_]+::)+)String$" --category Rust
+
+                elif use_recognizer_fn and line.startswith('type summary'):
+                    # get the name of the summary provider
+                    full_summary_provider_name = line.split(' -F ')[1].split(' ')[0]
+                    summary_provider_name = full_summary_provider_name.split('.')[-1]
+                    target_module_name = full_summary_provider_name.split('.')[0]
+                    recognizer_function = make_summary_provider_function(target_module_name, summary_provider_name, internal_dict)
+                    line = line.replace(full_summary_provider_name, recognizer_function)
                 debugger.HandleCommand(line.strip())
         print_message("Installed successfully!")
 
@@ -112,7 +145,7 @@ def install_rust_visualizers(debugger: SBDebugger, internal_dict):
         print_message(f"Error initializing Rust sysroot: {e}")
         return
 
-def __lldb_init_module(debugger: SBDebugger, dict):
+def __lldb_init_module(debugger: SBDebugger, dict):  # pyright: ignore[reportUnusedFunction]
     # Unexplained reentrancy issue, so we need to check if we're already installing visualizers
     if "INSTALLING_RUST_VISUALIZERS" in dict and dict["INSTALLING_RUST_VISUALIZERS"]:
         return
