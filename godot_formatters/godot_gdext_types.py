@@ -13,7 +13,7 @@ from godot_formatters.godot_gdext_providers import (
 GDEXT_VARIANT_PATTERN:str = f"^godot_core::builtin::variant::Variant$"
 GDEXT_DICTIONARY_PATTERN: str = "^godot_core::builtin::collections::dictionary::(Var)?Dictionary(<.*>)?$"
 GDEXT_ARRAY_PATTERN:str = "^godot_core::builtin::collections::array::Array<.*>$"
-GDEXT_VECTOR_PATTERN:str = "^godot_core::builtin::collections::packed_array::Packed.*Array$"
+GDEXT_VECTOR_PATTERN:str = "^godot_core::builtin::collections::packed_array::Packed.*Array.*$"
 # No Synthetic providers for these types, but they're opaque
 GDEXT_STRING_PATTERN:str = "^godot_core::builtin::string[s]?::gstring::GString$"
 GDEXT_STRING_NAME_PATTERN:str = "^godot_core::builtin::string[s]?::string_name::StringName$"
