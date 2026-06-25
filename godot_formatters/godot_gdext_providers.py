@@ -26,12 +26,27 @@ def get_godot_type_name(valobj: SBValue) -> str:
     return get_godot_type_name_from_str(rs_type_name)
 
 def get_godot_type_name_from_str(type_name: str) -> str:
-    type_name = type_name.split(sep="::")[-1]
+    type_arg = None
     if '<' in type_name:
-        type_name = type_name.split("<", 1)[0]
-    # trim the trailing `>` if it exists
-    while type_name.endswith(">"):
-        type_name = type_name[:-1]
+        if type_name.endswith(">"):
+            type_name = type_name[:-1]
+        splits = type_name.split("<", 1)
+        type_name = splits[0]
+        type_arg = get_godot_type_name_from_str(splits[1]).split("::")[-1]
+    type_name = type_name.split(sep="::")[-1]
+    
+    if type_name == "PackedArray" and type_arg is not None:
+        if type_arg == "u8":
+            type_arg = "Byte"
+        elif type_arg == "i32":
+            type_arg = "Int32"
+        elif type_arg == "i64":
+            type_arg = "Int64"
+        elif type_arg == "f32":
+            type_arg = "Float32"
+        elif type_arg == "f64":
+            type_arg = "Float64"
+        return f"Packed{type_arg}Array"
     if (type_name == "GString"):
         type_name = "String"
     elif (type_name == "Rid"):
