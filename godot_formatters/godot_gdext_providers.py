@@ -2,7 +2,7 @@
 from types import TracebackType
 from typing import Callable, final, Optional
 
-from lldb import SBValue  # pyright: ignore[reportMissingModuleSource]
+from lldb import SBTarget, SBType, SBValue  # pyright: ignore[reportMissingModuleSource]
 # fmt: on
 from enum import Enum
 import weakref
@@ -23,12 +23,15 @@ T = TypeVar("T", bound=GodotSynthProvider)
 def get_godot_type_name(valobj: SBValue) -> str:
     rs_type_name = valobj.GetType().GetName()
     # check if it's a template type first
-    if '<' in valobj.GetType().GetName():
-        rs_type_name = rs_type_name.split("<", 1)[0]
     return get_godot_type_name_from_str(rs_type_name)
 
 def get_godot_type_name_from_str(type_name: str) -> str:
     type_name = type_name.split(sep="::")[-1]
+    if '<' in type_name:
+        type_name = type_name.split("<", 1)[0]
+    # trim the trailing `>` if it exists
+    while type_name.endswith(">"):
+        type_name = type_name[:-1]
     if (type_name == "GString"):
         type_name = "String"
     elif (type_name == "Rid"):
@@ -40,13 +43,24 @@ def get_godot_type_name_from_str(type_name: str) -> str:
     type_name = "::" + type_name
     return type_name
 
+def find_godot_type(target: SBTarget, type_name: str) -> SBType:
+    variant_cpptype = target.FindFirstType(type=type_name)
+    if not variant_cpptype or not variant_cpptype.IsValid():
+        # try it without `::`
+        type_name = type_name.replace("::", "")
+        variant_cpptype = target.FindFirstType(type=type_name)
+    if not variant_cpptype or not variant_cpptype.IsValid():
+        raise Exception(f"ERROR: Variant type is not valid for {type_name}")
+    if variant_cpptype.GetName().startswith("godot_core::"):
+        # we found the rust type
+        raise Exception(f"ERROR: Could not find C++ type for {type_name}")
+    return variant_cpptype
+
 def get_real_valobj_from_opaque_member(valobj: SBValue) -> Optional[SBValue]:
 
     target = valobj.GetTarget()
     type_name = get_godot_type_name(valobj)
-    variant_cpptype = target.FindFirstType(type_name)
-    if not variant_cpptype or not variant_cpptype.IsValid():
-        raise Exception(f"ERROR: Variant type is not valid for {type_name}")
+    variant_cpptype = find_godot_type(target, type_name)
     opaque = valobj.GetChildAtIndex(0)
     if not opaque or not opaque.IsValid():
         raise Exception("ERROR: Opaque is not valid")
@@ -99,13 +113,10 @@ class GDExtGenericSynthProvider(GodotSynthProvider):
     def get_child_at_index(self, idx: int) -> SBValue:
         return self.synth_provider.get_child_at_index(idx)
 
-
 def get_real_valobj_from_raw_gd(valobj: SBValue) -> SBValue:
     target = valobj.GetTarget()
     type_name = get_godot_type_name_from_str(valobj.GetType().GetTemplateArgumentType(0).GetName())
-    variant_cpptype = target.FindFirstType(type_name)
-    if not variant_cpptype or not variant_cpptype.IsValid():
-        raise Exception(f"ERROR: Variant type is not valid for {type_name}")
+    variant_cpptype = find_godot_type(target, type_name)
     raw = valobj.GetChildAtIndex(0)
     if not raw or not raw.IsValid():
         raise Exception("ERROR: raw is not valid")
