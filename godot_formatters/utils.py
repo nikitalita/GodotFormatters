@@ -580,7 +580,7 @@ def strip_quotes(val: str):
     return val
 
 
-# Cowdata size is located at the cowdata address - 8 bytes (sizeof(uint64_t))
+# Cowdata size is located at the cowdata address - some bytes
 def get_exception_trace(e: Exception, before_exception_limit=5, _this_call_depth=2) -> str:
     stack_prefix = "Traceback (most recent call last):\n"
     exception_trace = traceback.format_exception(type(e), e, e.__traceback__)
@@ -736,12 +736,22 @@ def get_cowdata_size_or_none(_cowdata: SBValue, null_means_zero=True) -> Optiona
             return None
         uint64_type: SBType = _cowdata.GetTarget().GetBasicType(eBasicTypeUnsignedLongLong)
         ptr_addr_val = _ptr.GetValueAsUnsigned()
-        if ptr_addr_val - 8 < 0:
-            print_verbose("COWDATASIZE Invalid: ptr_addr_val - 8 is less than 0: " + str(ptr_addr_val))
+        size_field_offset = 8
+        cowdata_type: SBType = _cowdata.GetType()
+        if hasattr(cowdata_type, "GetStaticFieldWithName"):
+            _target: SBTarget = _cowdata.GetTarget()
+            data_offset: SBValue = cowdata_type.GetStaticFieldWithName("DATA_OFFSET").GetConstantValue(_target)
+            size_offset: SBValue = cowdata_type.GetStaticFieldWithName("SIZE_OFFSET").GetConstantValue(_target)
+            if data_offset.IsValid() and size_offset.IsValid() and data_offset.GetValueAsSigned() > size_offset.GetValueAsSigned():
+                size_field_offset = data_offset.GetValueAsSigned() - size_offset.GetValueAsSigned()
+        else:
+            print_verbose("GetStaticFieldWithName is not available to retrieve precise COWDATASIZE")
+        if ptr_addr_val - size_field_offset < 0:
+            print_verbose("COWDATASIZE Invalid: ptr_addr_val - " + str(size_field_offset) + " is less than 0: " + str(ptr_addr_val))
             return None
-        size_child: SBValue = _ptr.CreateValueFromAddress("size", ptr_addr_val - 8, uint64_type)
+        size_child: SBValue = _ptr.CreateValueFromAddress("size", ptr_addr_val - size_field_offset, uint64_type)
         if not size_child.IsValid():
-            print_verbose("COWDATASIZE Invalid: Size value at ptr_addr - 8 is not valid")
+            print_verbose("COWDATASIZE Invalid: Size value at ptr_addr - " + str(size_field_offset) + " is not valid")
             return None
         size = size_child.GetValueAsSigned()
         if size < 0:
